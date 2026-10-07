@@ -616,6 +616,11 @@
     <string name="wheel_key_role_previous">上一項</string>
     <string name="wheel_key_role_next">下一項</string>
     <string name="wheel_key_role_select">確認</string>
+    <string name="wheel_key_role_siri">Siri</string>
+    <string name="wheel_key_none">無</string>
+    <string name="wheel_key_in_use">此按鍵已用於%1$s。請選擇其他按鍵。</string>
+    <string name="wheel_siri_key">方向盤 Siri 按鍵</string>
+    <string name="wheel_siri_key_description">在 CarPlay 顯示於螢幕時，用你選擇的方向盤按鍵開啟 Siri。車輛自身保留的按鍵只能搭配方向盤按鍵服務使用，該服務在 CarPlay 處於背景時也可使用。未連接 CarPlay 或通話時，該按鍵保留車輛原有功能。</string>
     <string name="wheel_key_role_back">返回</string>
     <string name="wheel_key_service_label">DiPlay 方向盤按鍵</string>
     <string name="wheel_key_service_description">讓 DiPlay 使用在設定中選擇的方向盤按鍵縮放儀表板上的 CarPlay 地圖，並在 CarPlay 螢幕上移動選擇。它只接收按鍵，不讀取螢幕內容。</string>
@@ -670,6 +675,8 @@
     <string name="cluster_size_smallest">較小 · 地圖範圍較廣、細節較多</string>
     <string name="main_buffered_audio">緩衝音樂（實驗性）</string>
     <string name="main_buffered_audio_description">支援此功能的應用程式（例如 Apple Music）可預先傳送約兩分鐘的音樂，因此短暫的 Wi-Fi 中斷不會影響播放。其他應用程式仍使用一般串流。變更後會重新連線至 CarPlay。</string>
+    <string name="smooth_video">流暢影片（實驗性）</string>
+    <string name="smooth_video_description">依 iPhone 為每一幀標記的時間加上一段短延遲顯示 CarPlay 主畫面，而不是解碼後立即顯示。延遲會自動調整，讓大多數畫面能及時解碼；仍未按時準備好的畫面會立即顯示。捲動可能更平順，但觸控反應會變慢。畫面調整不適用。變更後會重新連線至 CarPlay。</string>
     <string name="manual_grant_cmd_hint">或在電腦上執行以下 ADB 指令：</string>
     <string name="manual_grant_reason_adboff">此車機尚未啟用本機 ADB（連接埠 5555）。\n您可以在系統設定中手動啟用無障礙服務，或啟用網路 ADB。</string>
     <string name="retry_auto_grant">重試自動授權</string>

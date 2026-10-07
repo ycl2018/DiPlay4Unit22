@@ -589,6 +589,11 @@
     <string name="wheel_key_role_previous">предыдущий пункт</string>
     <string name="wheel_key_role_next">следующий пункт</string>
     <string name="wheel_key_role_select">выбрать</string>
+    <string name="wheel_key_role_siri">Siri</string>
+    <string name="wheel_key_none">нет</string>
+    <string name="wheel_key_in_use">Эта кнопка уже назначена для «%1$s». Выберите другую кнопку.</string>
+    <string name="wheel_siri_key">Кнопка Siri на руле</string>
+    <string name="wheel_siri_key_description">Открывает Siri кнопкой на руле, которую вы выберете, пока CarPlay на экране. Кнопка, которую автомобиль оставляет себе, работает только со службой кнопок руля; служба работает и когда CarPlay в фоне. Без CarPlay или во время звонка кнопка сохраняет своё действие в автомобиле.</string>
     <string name="wheel_key_role_back">назад</string>
     <string name="wheel_key_service_label">Кнопки руля DiPlay</string>
     <string name="wheel_key_service_description">Позволяет DiPlay использовать выбранные в настройках кнопки руля для масштаба карты CarPlay на приборной панели и для перемещения по экрану CarPlay. Только получает нажатия кнопок и не читает экран.</string>
@@ -616,6 +621,8 @@
     <string name="side_panel_full_screen">⤢ На весь экран</string>
     <string name="main_buffered_audio">Буферизованная музыка (экспериментально)</string>
     <string name="main_buffered_audio_description">Приложения, которые это поддерживают (например, Apple Music), присылают музыку примерно на две минуты вперёд, поэтому короткие провалы Wi-Fi не слышны. Остальные приложения работают как раньше. Переподключает CarPlay.</string>
+    <string name="smooth_video">Плавное видео (экспериментально)</string>
+    <string name="smooth_video_description">Показывает каждый кадр главного экрана CarPlay по времени, которое отметил на нём iPhone, плюс небольшой запас, а не сразу после декодирования. Запас подстраивается сам, чтобы большинство кадров успевало декодироваться; кадры, всё равно не готовые к своему времени, показываются сразу. Прокрутка может стать ровнее, но отклик на касание запаздывает. Настройки картинки не применяются. Переподключает CarPlay.</string>
     <string name="car_button_in_carplay">Кнопка автомобиля в CarPlay</string>
     <string name="car_button_icon">Значок</string>
     <string name="car_button_icon_custom">Свой значок</string>

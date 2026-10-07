@@ -17,6 +17,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -31,7 +32,10 @@ import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.TextureView
+import android.view.ViewTreeObserver
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -121,6 +125,9 @@ class CarPlayHostActivity : ComponentActivity() {
     private var connectionPanel: View? = null
     private var wifiRecoveryButton: View? = null
     private var reconnectAttempts = 0
+    private val siriKey = WheelSiriKey()
+    private val siriKeyPresses = WheelKeyPresses()
+    private val legacySiriPresses = mutableSetOf<Triple<Int, Int, Int>>()
     private val startupRetryBudget = WirelessStartupRetryBudget()
     private var startupRetryStopped = false
     private var startupRetryButton: View? = null
@@ -240,17 +247,20 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     private val imagePicker =
-        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            if (uri == null) {
-                externalActivityInProgress = false
-                return@registerForActivityResult
-            }
-            imageCrop.launch(
-                Intent(this, ImageCropActivity::class.java)
-                    .setData(uri)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-            )
+        registerForActivityResult(ActivityResultContracts.GetContent(), ::cropSelectedImage)
+    private val imageDocumentPicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument(), ::cropSelectedImage)
+    private fun cropSelectedImage(uri: Uri?) {
+        if (uri == null) {
+            externalActivityInProgress = false
+            return
         }
+        imageCrop.launch(
+            Intent(this, ImageCropActivity::class.java)
+                .setData(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        )
+    }
     private val imageCrop =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             externalActivityInProgress = false
@@ -260,7 +270,18 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
-    private var videoView: TextureView? = null
+    // The full-window viewport stays independent of the letterboxed SurfaceView dimensions.
+    private var videoView: View? = null
+    private var fallbackVideoView: SurfaceView? = null
+    private var fallbackVideoBounds: CarPlaySurfaceBounds? = null
+    // Smooth video (a setting): SurfaceView output with frames released at the iPhone's frame time.
+    private var smoothVideo = false
+    // Sinks whose sessions are being torn down; their decoders may still render to the current surface
+    // until they have released their codecs, so a destroyed surface is detached from them too. A restart
+    // and a shutdown can overlap, so this is a set.
+    private val retiringSinks = java.util.concurrent.CopyOnWriteArraySet<AndroidMediaSink>()
+    internal var sinkReleaseWaitMillis = SINK_RELEASE_WAIT_MILLIS
+    private var videoSurfaceProbe: ViewTreeObserver.OnPreDrawListener? = null
     private var pictureBinding: CarPlayPicture.Binding? = null
     private var picturePanel: View? = null
     private var picturePanelGeneration = 0
@@ -295,7 +316,14 @@ class CarPlayHostActivity : ComponentActivity() {
     private var externalActivityInProgress = false
     private var sink: AndroidMediaSink? = null
     private var controller: CarPlayController? = null
-    private var currentSurface: Surface? = null
+    private val videoSurfaceOwner = CarPlayVideoSurfaceOwner<Surface>(
+        detach = { surface ->
+            sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
+            sink?.clearSurface(SCREEN_TYPE_ALT, surface)
+        },
+        release = { it.release() },
+    )
+    private val currentSurface: Surface? get() = videoSurfaceOwner.current
     private var currentSurfaceTexture: SurfaceTexture? = null
     private var clusterPresentation: ClusterMapPresentation? = null
     private var clusterSurface: Surface? = null
@@ -383,6 +411,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var darkMode = false
     private var paintWaitingScreen: () -> Unit = {}
     private var carPlayNightMode = CarPlayNightMode.SYSTEM
+    private var nightSchedule = CarPlayNightSchedule()
     private var ambientLightThreshold = AmbientLightThreshold()
     private var ambientDelaySeconds = 2
     private var nightModeDiagnosticSource = ThemeModeDiagnostics.Source.CARPLAY_MODE
@@ -391,14 +420,15 @@ class CarPlayHostActivity : ComponentActivity() {
             light = AndroidAmbientLight(this),
             scheduler = MainThreadNightModeScheduler(),
             initialNight = darkMode,
-        ) { night ->
-            darkMode = night
-            paintWaitingScreen()
-            applyClusterTurnOverlay()
-            appendLog("CarPlay switched to ${if (night) "night" else "day"} mode")
-            logThemeState(nightModeDiagnosticSource, resources.configuration)
-            syncAirPlayDarkMode(nightModeDiagnosticSource)
-        }
+            onNightChanged = { night ->
+                darkMode = night
+                paintWaitingScreen()
+                applyClusterTurnOverlay()
+                appendLog("CarPlay switched to ${if (night) "night" else "day"} mode")
+                logThemeState(nightModeDiagnosticSource, resources.configuration)
+                syncAirPlayDarkMode(nightModeDiagnosticSource)
+            },
+        )
     }
     private val themeDiagnostics = ThemeModeDiagnostics()
     private var lastConfiguration: Configuration? = null
@@ -463,8 +493,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 existing
             } else {
                 Surface(texture).also {
-                    existing?.release()
-                    currentSurface = it
+                    videoSurfaceOwner.replace(it, releaseOnDetach = true)
                     currentSurfaceTexture = texture
                 }
             }
@@ -481,18 +510,46 @@ class CarPlayHostActivity : ComponentActivity() {
 
         override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
             if (currentSurfaceTexture !== texture) return true
-            currentSurface?.let { surface ->
-                sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
-                sink?.clearSurface(SCREEN_TYPE_ALT, surface)
-                surface.release()
-            }
-            currentSurface = null
+            currentSurface?.let(videoSurfaceOwner::clear)
             currentSurfaceTexture = null
             appendLog("Texture surface destroyed")
             return true
         }
 
         override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+    }
+
+    private val fallbackSurfaceCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            if (isDestroyed || holder !== fallbackVideoView?.holder) return
+            val surface = holder.surface
+            videoSurfaceOwner.replace(surface, releaseOnDetach = false)
+            appendLog("SurfaceView video surface created valid=${surface.isValid}")
+            attachSurface(surface)
+            // A still CarPlay screen sends no frames, so ask for one instead of showing the parked gap.
+            if (smoothVideo) sink?.refreshPicture(SCREEN_TYPE_MAIN)
+            videoView?.let { updateVideoLayout(it.width, it.height) }
+        }
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            if (holder !== fallbackVideoView?.holder) return
+            // Holder dimensions describe the fitted video, not the host window/CarPlay canvas.
+            videoView?.let { updateVideoLayout(it.width, it.height) }
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            val surface = holder.surface
+            // The SurfaceHolder contract: nothing may render to the surface once this returns. Every decoder
+            // is asked at once, then waited for against one deadline; each confirms once it has moved,
+            // parked or released its codec, and closing decoders count once their workers exit. With
+            // smooth video the live session's main decoder parks off screen and keeps its state.
+            val live = sink
+            val detaches = (listOfNotNull(live) + retiringSinks).distinct()
+                .map { owner -> owner.beginSurfaceDetach(surface, parkMain = smoothVideo && owner === live) }
+            val confirmed = detaches.map { it.await() }.all { it }
+            videoSurfaceOwner.clear(surface)
+            appendLog("SurfaceView video surface destroyed detachConfirmed=$confirmed")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -563,11 +620,13 @@ class CarPlayHostActivity : ComponentActivity() {
         carPlayNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         ambientLightThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         ambientDelaySeconds = AirPlayPersistence.loadAmbientDelaySeconds(this)
+        nightSchedule = AirPlayPersistence.loadCarPlayNightSchedule(this)
         nightModeController.configure(
             carPlayNightMode,
             nightModeOrNull(resources.configuration.uiMode) ?: false,
             ambientLightThreshold,
             ambientDelaySeconds,
+            nightSchedule,
         )
         gestureFingerCount = AirPlayPersistence.loadSettingsGestureFingers(this)
         displayScalePercent = AirPlayPersistence.loadDisplayScalePercent(this)
@@ -744,12 +803,16 @@ class CarPlayHostActivity : ComponentActivity() {
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
+        val savedSchedule = AirPlayPersistence.loadCarPlayNightSchedule(this)
         val systemNight = nightModeOrNull(resources.configuration.uiMode) ?: false
-        if (savedNightMode != carPlayNightMode || savedThreshold != ambientLightThreshold || savedDelay != ambientDelaySeconds) {
+        if (savedNightMode != carPlayNightMode || savedThreshold != ambientLightThreshold ||
+            savedDelay != ambientDelaySeconds || savedSchedule != nightSchedule) {
             carPlayNightMode = savedNightMode
             ambientLightThreshold = savedThreshold
             ambientDelaySeconds = savedDelay
-            nightModeController.configure(carPlayNightMode, systemNight, ambientLightThreshold, ambientDelaySeconds)
+            nightSchedule = savedSchedule
+            nightModeController.configure(carPlayNightMode, systemNight, ambientLightThreshold, ambientDelaySeconds,
+                nightSchedule)
         }
         nightModeController.resume(systemNight)
         if (!menuOpen) {
@@ -1065,6 +1128,22 @@ class CarPlayHostActivity : ComponentActivity() {
 
     // Hardware navigation belongs to the iPhone-rendered CarPlay UI, not Android View focus.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val physicalKey = Triple(event.deviceId, event.keyCode, event.scanCode)
+        val downOrUp = event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP
+        if (downOrUp && physicalKey in legacySiriPresses) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                legacySiriPresses.remove(physicalKey)
+                requestLegacySiri(event.keyCode)
+            }
+            return true
+        }
+        // A release/repeat belongs to its original press even if a call, session or setting changed.
+        if (downOrUp && siriKeyPresses.hasConsumedPress(physicalKey)) {
+            siriKeyPresses.filter(physicalKey, event.action == KeyEvent.ACTION_DOWN, event.repeatCount == 0) {
+                WheelZoomKeys.Action.PASS
+            }
+            return true
+        }
         if (!menuOpen && AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this) &&
             CarPlayRemoteKeys.dispatch(event, controller)) {
             if (event.repeatCount == 0) {
@@ -1079,13 +1158,36 @@ class CarPlayHostActivity : ComponentActivity() {
         // During a CarPlay call the wheel's call key answers on the iPhone instead of opening BYD's phone app.
         if (CarPlayCallKeys.onKey(this, event.keyCode, event.action == KeyEvent.ACTION_DOWN, controller)) return true
 
+        // The wheel key service, when it runs, takes an assigned Siri key before this window sees it.
+        val assignedKey = WheelZoomSettings.isSiriKey(this, WheelKey.of(event))
+        val assignedAction = if (downOrUp) siriKeyPresses.filter(
+            physicalKey, event.action == KeyEvent.ACTION_DOWN, event.repeatCount == 0,
+        ) {
+            if (activeAirPlaySession == null || !assignedKey || inCall(this)) {
+                return@filter WheelZoomKeys.Action.PASS
+            }
+            if (siriKey.opens(event.eventTime)) {
+                val message = "Siri: assigned key ${event.keyCode} sent=${controller?.requestSiri() == true}"
+                Log.i(WheelKeyService.TAG, message)
+                appendLog(message)
+            }
+            WheelZoomKeys.Action.CONSUME
+        } else WheelZoomKeys.Action.PASS
+        if (assignedAction != WheelZoomKeys.Action.PASS) return true
+        if (downOrUp && assignedKey) return super.dispatchKeyEvent(event)
+
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_DOWN) legacySiriPresses.add(physicalKey)
         if (event.action == KeyEvent.ACTION_UP) {
-            val sent = controller?.requestSiri() == true
-            appendLog("Siri: voice key ${event.keyCode} sent=$sent")
+            requestLegacySiri(event.keyCode)
         }
         return true
+    }
+
+    private fun requestLegacySiri(keyCode: Int) {
+        val sent = controller?.requestSiri() == true
+        appendLog("Siri: voice key $keyCode sent=$sent")
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -1201,6 +1303,8 @@ class CarPlayHostActivity : ComponentActivity() {
         nightModeController.pause()
         pictureBinding?.close()
         pictureBinding = null
+        removeVideoSurfaceProbe()
+        fallbackVideoView?.holder?.removeCallback(fallbackSurfaceCallback)
         mainHandler.removeCallbacks(refreshTurnOverlay)
         AirPlayPersistence.overlaySettingsListener = null
         com.shilapi.xcertplay.hud.BydNavigationOutputs.setTurnOverlayListener(null)
@@ -1220,13 +1324,10 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
-        currentSurface?.let { surface ->
-            sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
-            sink?.clearSurface(SCREEN_TYPE_ALT, surface)
-            surface.release()
-        }
-        currentSurface = null
+        videoSurfaceOwner.clear()
         currentSurfaceTexture = null
+        fallbackVideoView = null
+        fallbackVideoBounds = null
         sessionLog?.append("Activity destroyed")
         sessionLog?.close()
         sessionLog = null
@@ -1394,6 +1495,8 @@ class CarPlayHostActivity : ComponentActivity() {
         safeAreaEditor = buildSafeAreaEditor().apply { visibility = View.GONE }
         root.addView(safeAreaEditor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
+        smoothVideo = AirPlayPersistence.loadSmoothVideo(this)
+        observeVideoWindow(video)
         gestureOverlay = gestureLayer
         settingsGestureHint = gestureHint
         stageStatusView = stage
@@ -2470,7 +2573,10 @@ class CarPlayHostActivity : ComponentActivity() {
                 isAllCaps = false
                 setOnClickListener {
                     externalActivityInProgress = true
-                    runCatching { imagePicker.launch("image/*") }.onFailure {
+                    launchCarButtonImagePicker(
+                        openDocument = { imageDocumentPicker.launch(arrayOf("image/*")) },
+                        getContent = { imagePicker.launch("image/*") },
+                    ).onFailure {
                         externalActivityInProgress = false
                         appendLog("No image picker: ${it.javaClass.simpleName}")
                         android.widget.Toast.makeText(this@CarPlayHostActivity,
@@ -3627,6 +3733,7 @@ class CarPlayHostActivity : ComponentActivity() {
             preferSoftwareHevcDecoder = hevcSoftwareDecoderEnabled,
             advancedAudioChannelMapping = advancedAudioChannelMapping,
             audioFocusEnabled = AirPlayPersistence.loadAudioFocusEnabled(this),
+            audioFocusAutoYield = AirPlayPersistence.loadAudioFocusAutoYield(this),
             mediaChannel = AirPlayPersistence.loadMediaAudioChannel(this),
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
             context = this,
@@ -3643,6 +3750,8 @@ class CarPlayHostActivity : ComponentActivity() {
                 }
             },
             onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
+            // Only a SurfaceView honours release timestamps; smooth video always selects one.
+            videoPacingDelayMillis = if (smoothVideo) smoothVideoDelayMillis(fps) else 0,
         )
     }
 
@@ -3778,6 +3887,15 @@ class CarPlayHostActivity : ComponentActivity() {
         val snapshot = CarPlayBackgroundSession.snapshot() ?: return false
         if (snapshot.controller.isClosed()) {
             CarPlayBackgroundSession.clear(snapshot.controller)
+            return false
+        }
+        // The sink's pacing is fixed when it is built; a session from before a Smooth video change (for
+        // example one whose reconnect stopped at a prerequisite) is stopped instead of adopted. Callers
+        // retry, and the next start matches this view.
+        if (!backgroundSessionMatchesView(snapshot.sink.videoPacingEnabled, smoothVideo)) {
+            appendLog("Background session smooth video=${snapshot.sink.videoPacingEnabled} differs from this view; " +
+                "stopping it instead of adopting it")
+            CarPlayBackgroundSession.stop { mainHandler.post { if (!isDestroyed) maybeStartCarPlay() } }
             return false
         }
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
@@ -4167,10 +4285,23 @@ class CarPlayHostActivity : ComponentActivity() {
         val view = videoView ?: return
         if (viewWidth <= 0 || viewHeight <= 0) return
         val content = contentRect(viewWidth, viewHeight)
-        view.setTransform(Matrix().apply {
-            setScale(content.width / viewWidth, content.height / viewHeight)
-            postTranslate(content.left, content.top)
-        })
+        val fallback = fallbackVideoView
+        if (fallback != null) {
+            val bounds = CarPlaySurfaceBounds.from(content)
+            if (fallbackVideoBounds != bounds) {
+                fallbackVideoBounds = bounds
+                fallback.layoutParams = FrameLayout.LayoutParams(bounds.width, bounds.height,
+                    Gravity.TOP or Gravity.LEFT).apply {
+                    leftMargin = bounds.left
+                    topMargin = bounds.top
+                }
+            }
+        } else {
+            (view as? TextureView)?.setTransform(Matrix().apply {
+                setScale(content.width / viewWidth, content.height / viewHeight)
+                postTranslate(content.left, content.top)
+            })
+        }
         if (sidePanelShown) placeSidePanel(viewWidth, viewHeight)
     }
 
@@ -4190,6 +4321,15 @@ class CarPlayHostActivity : ComponentActivity() {
             return
         }
         if (controller == null && adoptBackgroundSession()) return
+        // The video view is chosen once per activity; a changed Smooth video setting needs a new one.
+        if (controller == null && AirPlayPersistence.loadSmoothVideo(this) != smoothVideo) {
+            appendLog("Smooth video setting changed; rebuilding the video view")
+            // No session runs here, but a restart keeps this host as the session owner; the new instance
+            // must be able to start its own.
+            if (CarPlayBackgroundSession.isOwner(this)) CarPlayBackgroundSession.clear()
+            recreate()
+            return
+        }
         val size = activeDisplaySize ?: return
         val transportReady = if (wirelessEnabled) wirelessPermissionsReady else vpnReady
         val locationReady = !locationReportingEnabled || locationPermissionAvailable
@@ -4271,6 +4411,7 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayMediaKeys.detach(oldController)
         CarPlayBackgroundSession.clear(oldController, keepOwner = true)
         controller = null
+        oldSink?.let(retiringSinks::add)
         sink = null
         sessionDisplay = null
         val diagnosticLog = sessionLog
@@ -4284,7 +4425,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     "restart teardownWaitCompleted=$completed " +
                     "elapsedMs=${((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0)}",
             )
-            oldSink?.close()
+            oldSink?.let(::closeRetiringSink)
             runOnUiThread {
                 if (!shuttingDown.get() && generation == restartGeneration) {
                     handshakeResetInProgress = false
@@ -4300,6 +4441,15 @@ class CarPlayHostActivity : ComponentActivity() {
         controller?.sendTouch(emptyList())
         startActivity(Intent(this, DiPlayActivity::class.java)
             .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    }
+
+    /** Keep a timed-out sink visible to surface teardown until its codecs have actually been released. */
+    private fun closeRetiringSink(owner: AndroidMediaSink) {
+        owner.close()
+        val owners = retiringSinks
+        owner.whenVideoReleased { owners.remove(owner) }
+        // Preserve bounded teardown sequencing without blocking the UI or forgetting a live worker.
+        owner.awaitVideoReleased(sinkReleaseWaitMillis)
     }
 
     private fun openSettingsMenu() {
@@ -4331,7 +4481,8 @@ class CarPlayHostActivity : ComponentActivity() {
         controller?.sendTouch(emptyList())
         root.post {
             if (generation != picturePanelGeneration || isFinishing || isDestroyed) return@post
-            val panel = CarPlayPicturePanel(this, ::closePicturePanel)
+            val panel = CarPlayPicturePanel(this,
+                adjustmentsAvailable = fallbackVideoView == null, close = ::closePicturePanel)
             val availableWidth = (root.width - dp(24)).coerceAtLeast(1)
             val width = minOf(dp(420), if (root.width < dp(800)) availableWidth else (root.width * 0.42f).toInt())
             val height = minOf(dp(540), root.height - dp(24)).coerceAtLeast(1)
@@ -4418,13 +4569,14 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayMediaKeys.detach(oldController)
         CarPlayBackgroundSession.clear(oldController)
         controller = null
+        oldSink?.let(retiringSinks::add)
         sink = null
         sessionDisplay = null
         Log.i(TAG, "shutdown reason=$reason terminateProcess=$terminateProcess")
         teardownExecutor.execute {
             oldController?.close()
             val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
-            oldSink?.close()
+            oldSink?.let(::closeRetiringSink)
             airPlayCommandExecutor.shutdown()
             if (terminateProcess) {
                 applicationContext.stopService(Intent(applicationContext, CarPlayVpnService::class.java))
@@ -4435,6 +4587,64 @@ class CarPlayHostActivity : ComponentActivity() {
             mainHandler.post { completion() }
             if (terminateProcess) Process.killProcess(Process.myPid())
         }
+    }
+
+    private fun observeVideoWindow(texture: TextureView) {
+        val probe = object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (!texture.isAttachedToWindow) return true
+                removeVideoSurfaceProbe()
+                if (isDestroyed || videoView !== texture) return true
+                val mode = carPlayVideoSurfaceMode(texture.isHardwareAccelerated, smoothVideo)
+                appendLog("Video output mode=$mode windowHardwareAccelerated=${texture.isHardwareAccelerated} " +
+                    "smoothVideo=$smoothVideo")
+                if (mode == CarPlayVideoSurfaceMode.TEXTURE) return true
+                useFallbackVideoSurface(texture)
+                return false // Measure the replacement before drawing the software window.
+            }
+        }
+        videoSurfaceProbe = probe
+        texture.viewTreeObserver.addOnPreDrawListener(probe)
+    }
+
+    private fun removeVideoSurfaceProbe() {
+        val probe = videoSurfaceProbe ?: return
+        videoView?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(probe)
+        videoSurfaceProbe = null
+    }
+
+    private fun useFallbackVideoSurface(texture: TextureView) {
+        val root = texture.parent as? FrameLayout ?: return
+        val index = root.indexOfChild(texture)
+        val viewport = FrameLayout(this).apply { clipChildren = true }
+        val surfaceView = SurfaceView(this)
+        pictureBinding?.close()
+        pictureBinding = null
+        // Detach our wrapper before removing its TextureView; a late destruction callback
+        // must not clear the framework-owned replacement surface.
+        videoSurfaceOwner.clear()
+        currentSurfaceTexture = null
+        texture.surfaceTextureListener = null
+        root.removeView(texture)
+        videoView = viewport
+        fallbackVideoView = surfaceView
+        surfaceView.holder.addCallback(fallbackSurfaceCallback)
+        viewport.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
+        viewport.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val width = right - left
+            val height = bottom - top
+            updateVideoLayout(width, height)
+            if (width != oldRight - oldLeft || height != oldBottom - oldTop) {
+                scheduleDisplaySize(width, height)
+            }
+        }
+        root.addView(viewport, index, texture.layoutParams)
+        appendLog(if (smoothVideo) {
+            "Using SurfaceView video output: smooth video, frames shown at the iPhone's frame time + a delay " +
+                "starting at ${smoothVideoDelayMillis(fps)} ms; picture adjustments unavailable"
+        } else {
+            "Using SurfaceView video output: window has no hardware acceleration; picture adjustments unavailable"
+        })
     }
 
     private fun attachSurface(surface: Surface) {
@@ -4704,6 +4914,9 @@ class CarPlayHostActivity : ComponentActivity() {
         const val TAG = "xcertplay-usb"
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111
+        // On the teardown thread: bounded sequencing wait. Release notification retains ownership beyond
+        // this budget when a codec is still busy.
+        const val SINK_RELEASE_WAIT_MILLIS = 2_000L
         private const val CENTER_MAP_IDLE_MILLIS = 3_000L // a reconnect is quicker; a session end is not
         const val LOG_RETENTION_MILLIS = 5 * 60_000L
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L

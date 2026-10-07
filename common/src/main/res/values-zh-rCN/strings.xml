@@ -633,6 +633,11 @@
     <string name="wheel_key_role_previous">上一项</string>
     <string name="wheel_key_role_next">下一项</string>
     <string name="wheel_key_role_select">确认</string>
+    <string name="wheel_key_role_siri">Siri</string>
+    <string name="wheel_key_none">无</string>
+    <string name="wheel_key_in_use">该按键已用于%1$s。请选择其他按键。</string>
+    <string name="wheel_siri_key">方向盘 Siri 按键</string>
+    <string name="wheel_siri_key_description">在 CarPlay 显示于屏幕时，用你选择的方向盘按键打开 Siri。车辆自身保留的按键只能配合方向盘按键服务使用，该服务在 CarPlay 处于后台时也可使用。未连接 CarPlay 或通话时，该按键保留车辆原有功能。</string>
     <string name="wheel_key_role_back">返回</string>
     <string name="wheel_key_service_label">DiPlay 方向盘按键</string>
     <string name="wheel_key_service_description">让 DiPlay 使用在设置中选择的方向盘按键缩放仪表盘上的 CarPlay 地图，并在 CarPlay 屏幕上移动选择。它只接收按键，不读取屏幕内容。</string>
@@ -676,6 +681,8 @@
     <string name="side_panel_full_screen">⤢ 全屏</string>
     <string name="main_buffered_audio">缓冲音乐（实验性）</string>
     <string name="main_buffered_audio_description">支持此功能的应用（如 Apple Music）会提前发送约两分钟的音乐，因此短暂的 Wi-Fi 中断不会被听到。其他应用保持原样。会重新连接 CarPlay。</string>
+    <string name="smooth_video">流畅视频（实验性）</string>
+    <string name="smooth_video_description">按 iPhone 为每一帧标记的时间加上一段短延迟显示 CarPlay 主画面，而不是解码后立即显示。延迟会自动调整，让大多数帧能及时解码；仍未按时准备好的帧会立即显示。滚动可能更均匀，但触控响应会变慢。画面调整不适用。会重新连接 CarPlay。</string>
     <string name="car_button_in_carplay">CarPlay 中的车辆按钮</string>
     <string name="car_button_icon">图标</string>
     <string name="car_button_icon_custom">自定义图标</string>
