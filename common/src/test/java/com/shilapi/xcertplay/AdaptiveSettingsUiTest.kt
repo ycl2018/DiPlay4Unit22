@@ -563,6 +563,42 @@ class AdaptiveSettingsUiTest {
     }
 
     @Test
+    @Config(sdk = [28])
+    fun mtkDecoderTuningAppearsOnlyForMtkAndMarksReconnect() {
+        assertFalse(AirPlayPersistence.loadMtkDecoderTuning(context))
+        val screen = openSettings()
+        ReflectionHelpers.setField(screen, "settingsCategory", SettingsCategory.ADVANCED)
+        screen.selectedMtkDecoderName = { null }
+        ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+        assertFalse(texts(screen).any { it.text == screen.getString(R.string.settings_mtk_decoder_tuning) })
+
+        val decoderName = "OMX.MTK.VIDEO.DECODER.HEVC"
+        screen.selectedMtkDecoderName = { decoderName }
+        ReflectionHelpers.callInstanceMethod<Unit>(screen, "render")
+        assertTrue(texts(screen).any {
+            it.text == screen.getString(R.string.settings_mtk_decoder_tuning_description, decoderName)
+        })
+
+        val session = mock(CarPlayController::class.java)
+        CarPlayBackgroundSession.store(session, mock(AndroidMediaSink::class.java), 800, 480, Any(),
+            CarPlaySessionDisplay(800, 480, Surface.ROTATION_0, false, false, 800, 480)) {}
+        CarPlayBackgroundSession.active = true
+        try {
+            val setting = descendants(screen.window.decorView).filterIsInstance<Switch>()
+                .single { it.contentDescription == screen.getString(R.string.settings_mtk_decoder_tuning) }
+            assertFalse(setting.isChecked)
+            setting.performClick()
+
+            assertTrue(AirPlayPersistence.loadMtkDecoderTuning(context))
+            assertTrue(PendingReconnect.isPending(session))
+            assertSame(session, CarPlayBackgroundSession.snapshot()?.controller)
+        } finally {
+            CarPlayBackgroundSession.clear()
+            PendingReconnect.clear()
+        }
+    }
+
+    @Test
     @Config(sdk = [29], qualifiers = "en-w1000dp-h700dp")
     fun expandedRailStaysOutsideTheScrollingCategory() {
         val screen = openSettings()

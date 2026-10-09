@@ -195,6 +195,8 @@ class AndroidMediaSink(
     private val videoPacingDelayMillis: Int = 0,
     /** The main screen's frame rate (the frame-rate setting), requested from its decoder as the operating rate; 0 for none. */
     private val mainVideoFrameRate: Int = 0,
+    /** Opt-in MTK ACodec low-latency/no-reorder modes, with per-session automatic fallback. */
+    private val mtkDecoderTuningEnabled: Boolean = false,
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -607,6 +609,9 @@ class AndroidMediaSink(
         // Only the main screen goes to the host's SurfaceView; mirrors and the cluster keep their path.
         pacingDelayNanos = if (type == MAIN_SCREEN_TYPE && statsLabel == null) videoPacingDelayMillis * 1_000_000L else 0L,
         operatingRate = videoOperatingRate(type, statsLabel, mainVideoFrameRate),
+        // Keep the experimental vendor mode on the main CarPlay picture only. Mirrors and the
+        // cluster have separate timing and must retain their established decoder configuration.
+        mtkDecoderTuningEnabled = mtkDecoderTuningEnabled && type == MAIN_SCREEN_TYPE && statsLabel == null,
     ).also { if (startImmediately) it.start() }
 
     @Synchronized
@@ -698,19 +703,31 @@ internal class ParkingOutput(width: Int, height: Int) {
 internal fun videoOperatingRate(type: Int, statsLabel: String?, frameRate: Int): Int =
     if (type == MAIN_SCREEN_TYPE && statsLabel == null && frameRate > 0) frameRate else 0
 
-internal data class DecoderAttempt(val codecName: String?, val tuned: Boolean, val operatingRate: Int = 0)
+internal data class DecoderAttempt(
+    val codecName: String?,
+    val tuned: Boolean,
+    val operatingRate: Int = 0,
+    val mtkMode: MtkDecoderMode = MtkDecoderMode.NONE,
+)
 
 /**
  * Configure attempts in order. Some vendor decoders (e.g. MediaTek c2.mtk.avc.decoder) reject the tuned
  * parameters with BAD_VALUE, so a minimal format and then software follow. An [operatingRate] is tried
  * first on its own, so a decoder that refuses it keeps the tuned format it gets without one.
  */
-internal fun videoDecoderAttempts(operatingRate: Int, softwareDecoder: String?): List<DecoderAttempt> = listOfNotNull(
-    DecoderAttempt(codecName = null, tuned = true, operatingRate = operatingRate).takeIf { operatingRate > 0 },
-    DecoderAttempt(codecName = null, tuned = true),
-    DecoderAttempt(codecName = null, tuned = false),
-    softwareDecoder?.let { DecoderAttempt(it, tuned = false) },
-)
+internal fun videoDecoderAttempts(
+    operatingRate: Int,
+    softwareDecoder: String?,
+    maximumMtkMode: MtkDecoderMode = MtkDecoderMode.NONE,
+): List<DecoderAttempt> = buildList {
+    val mtkModes = maximumMtkMode.attempts()
+    if (operatingRate > 0) {
+        mtkModes.forEach { add(DecoderAttempt(null, tuned = true, operatingRate, it)) }
+    }
+    mtkModes.forEach { add(DecoderAttempt(null, tuned = true, mtkMode = it)) }
+    add(DecoderAttempt(codecName = null, tuned = false))
+    softwareDecoder?.let { add(DecoderAttempt(it, tuned = false)) }
+}
 
 /**
  * The operating rate to ask for at the next configure: none once a later attempt ([used]) worked after
@@ -733,6 +750,7 @@ private class VideoDecoder(
     /** Called on the worker as its last step, after it has released its codec. */
     private val onExit: (VideoDecoder) -> Unit = {},
     operatingRate: Int = 0,
+    mtkDecoderTuningEnabled: Boolean = false,
 ) : Closeable {
     private val pacer = FramePacer()
     private val pacingDelay = if (pacingDelayNanos > 0) PacingDelay(pacingDelayNanos) else null
@@ -763,6 +781,10 @@ private class VideoDecoder(
     // the current codec was configured with.
     private var operatingRate = operatingRate
     private var configuredRate = 0
+    private var maximumMtkMode = if (mtkDecoderTuningEnabled) {
+        MtkDecoderMode.LOW_LATENCY_NO_REORDER
+    } else MtkDecoderMode.NONE
+    private var configuredMtkMode = MtkDecoderMode.NONE
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
     private var failureReports = 0
@@ -857,6 +879,12 @@ private class VideoDecoder(
                 } catch (error: Exception) {
                     if (running) Log.e(TAG, "video decoder job failed: ${job?.javaClass?.simpleName}", error)
                     if (running) reportFailure("stage=${job?.javaClass?.simpleName ?: "drain"}", error)
+                    // Vendor codecs may expose a native failure either as CodecException or as the
+                    // broader IllegalStateException documented by MediaCodec. Both retire an active
+                    // experimental mode before the decoder is recreated.
+                    if (error is IllegalStateException) {
+                        dropMtkTuning("codec failed during ${job?.javaClass?.simpleName ?: "drain"}")
+                    }
                     // A codec can accept the rate and still fail once it runs (start errors may surface on
                     // later calls): one that failed before its first frame with it is not given it again.
                     if (configuredRate > 0 && !renderedFrameLogged && error is MediaCodec.CodecException) {
@@ -915,26 +943,36 @@ private class VideoDecoder(
             )
         }
         val requestedRate = operatingRate
-        var next: MediaCodec? = null
+        var configured: ConfiguredVideoDecoder? = null
         var used: DecoderAttempt? = null
-        for (attempt in videoDecoderAttempts(requestedRate, softwareDecoderName(mime))) {
-            next = tryConfigure(mime, csd, surface, attempt)
-            if (next != null) { used = attempt; break }
+        for (attempt in videoDecoderAttempts(requestedRate, softwareDecoderName(mime), maximumMtkMode)) {
+            configured = tryConfigure(mime, csd, surface, attempt)
+            if (configured != null) { used = attempt; break }
         }
-        if (next == null) {
+        if (configured == null) {
             report("decoder configuration failed mime=$mime size=${width}x$height")
         }
         if (nextOperatingRate(requestedRate, used) != requestedRate) dropOperatingRate("refused at configure")
-        decoder = next
+        decoder = configured?.codec
         configuredRate = used?.operatingRate ?: 0
+        configuredMtkMode = configured?.mtkMode ?: MtkDecoderMode.NONE
+        if (configured != null && MtkDecoderTuning.supportsLegacyAcodecKeys(configured.codecName) &&
+            configuredMtkMode.ordinal < maximumMtkMode.ordinal) {
+            report("MTK decoder tuning fell back at configure from=${maximumMtkMode.diagnosticName} " +
+                "to=${configuredMtkMode.diagnosticName}")
+            maximumMtkMode = configuredMtkMode
+        }
         renderedFrameLogged = false
         submittedFrameLogged = false
-        if (next != null) {
+        if (configured != null) {
             val rate = if (requestedRate > 0) " operatingRate=$configuredRate" else ""
-            report("decoder=${next.name} mime=$mime size=${width}x$height$rate")
+            val mtk = if (MtkDecoderTuning.isDecoderName(configured.codecName)) {
+                " mtkTuning=${configuredMtkMode.diagnosticName}"
+            } else ""
+            report("decoder=${configured.codecName} mime=$mime size=${width}x$height$rate$mtk")
             Log.i(
                 TAG,
-                "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
+                "video decoder configured name=${configured.codecName} mime=$mime size=${width}x$height$mtk",
             )
         }
     }
@@ -944,41 +982,70 @@ private class VideoDecoder(
         operatingRate = 0
     }
 
-    private fun buildFormat(mime: String, csd: List<ByteArray>, attempt: DecoderAttempt): MediaFormat =
+    private fun dropMtkTuning(reason: String) {
+        val previous = configuredMtkMode
+        if (previous == MtkDecoderMode.NONE) return
+        val fallback = previous.fallback()
+        if (fallback.ordinal < maximumMtkMode.ordinal) maximumMtkMode = fallback
+        report("MTK decoder tuning ${previous.diagnosticName} dropped: $reason; " +
+            "next=${fallback.diagnosticName}")
+    }
+
+    private fun buildFormat(
+        mime: String,
+        csd: List<ByteArray>,
+        attempt: DecoderAttempt,
+        mtkMode: MtkDecoderMode,
+    ): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {
             if (attempt.tuned) {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 if (attempt.operatingRate > 0) setInteger(MediaFormat.KEY_OPERATING_RATE, attempt.operatingRate)
             }
+            mtkMode.formatKeys().forEach { setInteger(it, 1) }
             csd.forEachIndexed { index, bytes -> setByteBuffer("csd-$index", ByteBuffer.wrap(bytes)) }
         }
+
+    private data class ConfiguredVideoDecoder(
+        val codec: MediaCodec,
+        val codecName: String,
+        val mtkMode: MtkDecoderMode,
+    )
 
     private fun tryConfigure(
         mime: String,
         csd: List<ByteArray>,
         surface: Surface,
         attempt: DecoderAttempt,
-    ): MediaCodec? {
+    ): ConfiguredVideoDecoder? {
         var candidate: MediaCodec? = null
+        var mtkMode = MtkDecoderMode.NONE
         return try {
-            val format = buildFormat(mime, csd, attempt)
             val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) } ?: createDecoder(mime)
             candidate = codec
+            val createdName = runCatching { codec.name }.getOrNull().orEmpty()
+            mtkMode = appliedMtkDecoderMode(attempt.mtkMode, createdName)
+            val format = buildFormat(mime, csd, attempt, mtkMode)
             if (attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 codec.codecInfo.getCapabilitiesForType(mime).isFeatureSupported("low-latency")) {
                 format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
             codec.configure(format, surface, null, 0)
             codec.start()
-            codec
+            val configuredName = runCatching { codec.name }.getOrNull().orEmpty()
+                .ifEmpty { createdName }
+                .ifEmpty { attempt.codecName ?: "default" }
+            ConfiguredVideoDecoder(codec, configuredName, mtkMode)
         } catch (error: Exception) {
             runCatching { candidate?.release() }
-            reportFailure("stage=configure tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime", error)
+            reportFailure("stage=configure tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} " +
+                "mtkTuning=${mtkMode.diagnosticName} mime=$mime", error)
             Log.w(
                 TAG,
                 "video decoder configure failed name=${attempt.codecName ?: "default"} " +
-                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} mime=$mime size=${width}x$height",
+                    "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} " +
+                    "mtkTuning=${mtkMode.diagnosticName} mime=$mime size=${width}x$height",
                 error,
             )
             null
@@ -1096,7 +1163,11 @@ private class VideoDecoder(
             running = { running }, drain = { drainOutput(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
         )
-        if (index < 0) { recover("video decoder input stalled"); return }
+        if (index < 0) {
+            dropMtkTuning("video decoder input stalled")
+            recover("video decoder input stalled")
+            return
+        }
         val input = checkNotNull(codec.getInputBuffer(index)) { "Decoder input buffer unavailable" }
         input.clear()
         if (annexB.size <= input.remaining()) {
@@ -1227,6 +1298,7 @@ private class VideoDecoder(
         val codec = decoder
         decoder = null
         configuredRate = 0
+        configuredMtkMode = MtkDecoderMode.NONE
         if (codec != null) {
             try {
                 codec.stop()

@@ -87,6 +87,27 @@ the branch contract or introduce a proven Changan-specific policy without regres
 volume control. Validate physical volume buttons separately from play/pause, next/previous and
 CarPlay audio playback.
 
+### Experimental MediaTek decoder tuning
+
+The S202 platform is MediaTek-based. Advanced settings may expose **MTK decoder low latency
+(experimental)** only when Android's first decoder for the selected H.264/HEVC format has an
+`OMX.MTK.` component name. The published `vdec-*` bridge is an ACodec/OMX extension; detecting a
+`c2.mtk.` Codec2 decoder alone is not enough to expose or apply it. The option is off by default and
+applies only to the main CarPlay screen at the next connection.
+
+Preserve its ordered fallback contract:
+
+1. Try MTK's legacy `vdec-lowlatency` and `vdec-no-record` (no-reorder) ACodec keys together.
+2. If configuration fails, retry with `vdec-lowlatency` only.
+3. If that fails, retry the existing standard tuned format without MTK keys.
+4. Retain the existing operating-rate and minimal-format fallbacks. A runtime codec failure or
+   input stall while an MTK mode is active must lower the maximum MTK mode before recreation.
+
+Never apply these keys to a non-OMX MTK decoder, a mirror or the cluster stream. Do not turn the option
+on by default: vendor support varies, no-reorder assumes a real-time stream that does not require
+display reordering, and a configuration accepted by a vendor codec can still fail after start.
+Diagnostics must record the actual codec name, selected MTK mode and each automatic downgrade.
+
 ### Missing AOSP components
 
 This firmware omits some activities normally supplied by a full AOSP system image. Never assume

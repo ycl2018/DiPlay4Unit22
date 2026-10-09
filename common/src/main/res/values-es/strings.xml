@@ -643,6 +643,8 @@
     <string name="call_voice_filter_description">Reduce los graves del audio de llamadas de CarPlay. Puede cambiar cómo suenan las voces. Se aplica en la próxima conexión de CarPlay.</string>
     <string name="smooth_video">Vídeo fluido (experimental)</string>
     <string name="smooth_video_description">Muestra cada fotograma de la pantalla principal de CarPlay en el momento que marcó el iPhone más un pequeño retardo, en lugar de en cuanto se decodifica. El retardo se ajusta solo para que la mayoría de los fotogramas se decodifiquen a tiempo; los que aun así no están listos a tiempo se muestran al instante. El desplazamiento puede verse más uniforme, pero el toque responde más tarde. Los ajustes de imagen no se aplican. Reconecta CarPlay.</string>
+    <string name="settings_mtk_decoder_tuning">Baja latencia del decodificador MTK (experimental)</string>
+    <string name="settings_mtk_decoder_tuning_description">Se detectó %1$s para el formato de vídeo seleccionado. Prueba los modos MTK sin reordenación y de baja latencia, y vuelve automáticamente a configuraciones más seguras si el decodificador los rechaza o falla. Puede reducir el retardo del vídeo, pero algunos firmwares pueden entrecortarse o fallar. Se aplica en la próxima conexión de CarPlay.</string>
     <string name="car_button_in_carplay">Botón del coche en CarPlay</string>
     <string name="car_button_icon">Icono</string>
     <string name="car_button_icon_custom">Icono personalizado</string>

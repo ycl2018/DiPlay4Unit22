@@ -703,6 +703,8 @@
     <string name="call_voice_filter_description">削减 CarPlay 通话音频的低音。这可能改变人声的音色。下次连接 CarPlay 时生效。</string>
     <string name="smooth_video">流畅视频（实验性）</string>
     <string name="smooth_video_description">按 iPhone 为每一帧标记的时间加上一段短延迟显示 CarPlay 主画面，而不是解码后立即显示。延迟会自动调整，让大多数帧能及时解码；仍未按时准备好的帧会立即显示。滚动可能更均匀，但触控响应会变慢。画面调整不适用。会重新连接 CarPlay。</string>
+    <string name="settings_mtk_decoder_tuning">MTK 解码器低延迟（实验性）</string>
+    <string name="settings_mtk_decoder_tuning_description">检测到所选视频格式使用 %1$s。依次尝试 MTK 无重排和低延迟模式；如果解码器拒绝配置或运行失败，会自动回退到更安全的配置。它可能降低画面延迟，但某些固件可能卡顿或解码失败。下次连接 CarPlay 时生效。</string>
     <string name="car_button_in_carplay">CarPlay 中的车辆按钮</string>
     <string name="car_button_icon">图标</string>
     <string name="car_button_icon_custom">自定义图标</string>
