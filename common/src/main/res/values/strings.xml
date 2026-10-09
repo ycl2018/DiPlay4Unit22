@@ -852,4 +852,6 @@
     <string name="cluster_small_window_card_opacity">Small-window turn card · opacity</string>
     <string name="turn_card_theme_day">Always day</string>
     <string name="turn_card_theme_night">Always night</string>
+    <string name="settings_media_key_audio_focus">Steering-wheel media-key focus (experimental)</string>
+    <string name="settings_media_key_audio_focus_description">Keeps a media audio-focus request while CarPlay music is active so some head units send steering-wheel play, pause and track keys to DiPlay. Turn it off if the vehicle volume buttons are redirected to DiPlay or stop changing volume. Applies at the next CarPlay connection.</string>
 </resources>

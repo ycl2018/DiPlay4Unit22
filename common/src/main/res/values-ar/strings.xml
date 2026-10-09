@@ -751,4 +751,6 @@
     <string name="settings_ambient_parked_notice">اضبط أثناء الوقوف. دعم تجريبي لبعض واجهات BYD؛ التوافق يختلف حسب الطراز والبرنامج الثابت. المستوى 0 يعني أدنى مستوى للمصنع وليس إطفاء الإضاءة.</string>
     <string name="settings_ambient_checking">جارٍ التحقق…</string>
     <string name="settings_ambient_unavailable">فشل التحقق للقراءة فقط: تفويض ADB الموجود أو واجهة الإضاءة المدعومة غير متاحة. لم تُحفظ الإعدادات. اضبط الوصول بشكل منفصل أثناء الوقوف؛ هذه الميزة لا تفعّل ADB ولا تطلب التفويض.</string>
+    <string name="settings_media_key_audio_focus">تركيز صوت مفاتيح الوسائط في عجلة القيادة (تجريبي)</string>
+    <string name="settings_media_key_audio_focus_description">يُبقي طلب تركيز صوت الوسائط نشطًا أثناء تشغيل موسيقى CarPlay لكي ترسل بعض الوحدات الرئيسية أزرار التشغيل والإيقاف المؤقت وتغيير المسار في عجلة القيادة إلى DiPlay. أوقفه إذا أُعيد توجيه أزرار مستوى صوت السيارة إلى DiPlay أو توقفت عن تغيير مستوى الصوت. يُطبّق عند اتصال CarPlay التالي.</string>
 </resources>

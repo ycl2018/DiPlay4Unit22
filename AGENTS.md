@@ -75,17 +75,18 @@ upstream is merged.
 
 ### Audio focus and physical volume keys
 
-The branch intentionally avoids requesting Android audio focus from `CarPlayMediaKeys` on the
-reference head unit. When DiPlay owns audio focus on this firmware, the physical volume buttons
-are routed to DiPlay. DiPlay does not implement vehicle volume adjustment for those events, so the
-driver can no longer change volume. Without the focus request, the head unit continues routing the
-buttons to its music-volume path.
+The **Steering-wheel media-key focus (experimental)** setting controls whether `CarPlayMediaKeys`
+requests permanent Android media focus. It is off by default on this branch. When DiPlay owns audio
+focus on the reference firmware, the physical volume buttons are routed to DiPlay. DiPlay does not
+implement vehicle volume adjustment for those events, so the driver can no longer change volume.
+With the setting off, the active media session remains available while the head unit continues
+routing volume buttons to its music-volume path. Other head units that require focus to deliver
+play/pause or track keys can opt in; the setting applies at the next CarPlay connection.
 
-Do not restore the upstream audio-focus request solely to make upstream focus-forwarding tests
-pass. Tests merged from upstream may assume that `focusRequest` is non-null; adapt such tests to
-the branch contract or introduce a proven Changan-specific policy without regressing physical
-volume control. Validate physical volume buttons separately from play/pause, next/previous and
-CarPlay audio playback.
+Do not turn media-key audio focus on by default solely to match upstream behavior or tests. Cover
+both setting states: disabled must leave `focusRequest` null, while enabled must preserve safe focus
+forwarding and stale-controller isolation. Validate physical volume buttons separately from
+play/pause, next/previous and CarPlay audio playback.
 
 ### Experimental MediaTek decoder tuning
 
@@ -129,7 +130,7 @@ Before reporting a Changan adaptation or upstream merge as complete, check all o
 addition to the normal CI command:
 
 1. IPv4 remains preferred for a dual-stack `ap0` and the iPhone receives `192.168.43.1`.
-2. No change reintroduces mandatory audio-focus ownership that captures the physical volume keys.
+2. Media-key audio focus remains optional and off by default, so it cannot capture the physical volume keys after an upgrade.
 3. API 28 paths do not require missing VPN consent, DocumentsUI or other optional AOSP activities.
 4. Diagnostics and proposed fixes do not assume root access.
 5. The built/tested APK comes from `mobile`, and its package/variant/signing identity is recorded.

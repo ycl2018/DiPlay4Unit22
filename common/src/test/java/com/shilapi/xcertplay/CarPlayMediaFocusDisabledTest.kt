@@ -4,6 +4,7 @@ import android.media.session.MediaSession
 import android.os.Looper
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
@@ -28,9 +29,14 @@ class CarPlayMediaFocusDisabledTest {
     private val app get() = RuntimeEnvironment.getApplication()
     private val controllers = mutableListOf<CarPlayController>()
 
+    @Before fun disableMediaKeyFocus() {
+        AirPlayPersistence.saveMediaKeyAudioFocus(app, false)
+    }
+
     @After fun cleanup() {
         controllers.forEach(CarPlayMediaKeys::detach)
         CarPlayBackgroundSession.clear()
+        AirPlayPersistence.saveMediaKeyAudioFocus(app, false)
         shadowOf(Looper.getMainLooper()).idle()
     }
 

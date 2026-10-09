@@ -811,4 +811,6 @@
     <string name="cluster_small_window_card_opacity">小屏转向卡 · 透明度</string>
     <string name="turn_card_theme_day">始终白天</string>
     <string name="turn_card_theme_night">始终夜间</string>
+    <string name="settings_media_key_audio_focus">方向盘媒体键音频焦点（实验性）</string>
+    <string name="settings_media_key_audio_focus_description">在 CarPlay 音乐播放时持续申请媒体音频焦点，使部分车机将方向盘播放、暂停和切歌按键发送给 DiPlay。如果车辆音量键被发送给 DiPlay 或无法调节音量，请关闭。下次连接 CarPlay 时生效。</string>
 </resources>

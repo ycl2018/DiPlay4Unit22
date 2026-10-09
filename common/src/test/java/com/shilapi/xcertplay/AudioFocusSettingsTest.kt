@@ -25,10 +25,16 @@ class AudioFocusSettingsTest {
             .apply { isAccessible = true }.invoke(activity, page)
         activity.setContentView(page)
         val switches = views(page).filterIsInstance<Switch>().toList()
-        assertEquals(2, switches.size)
+        assertEquals(3, switches.size)
+        val mediaKeys = switches.single {
+            it.contentDescription == activity.getString(R.string.settings_media_key_audio_focus)
+        }
         val focus = switches.single { it.contentDescription == activity.getString(R.string.contrib_audio_home_toggle_audio_focus) }
         val mute = switches.single { it.contentDescription == activity.getString(R.string.audio_focus_auto_yield) }
         val dependent = mute.parent.parent as View
+        assertEquals(View.GONE, dependent.visibility)
+        mediaKeys.isChecked = true
+        assertTrue(AirPlayPersistence.loadMediaKeyAudioFocus(activity))
         assertEquals(View.GONE, dependent.visibility)
         focus.isChecked = true
         assertEquals(View.VISIBLE, dependent.visibility)
