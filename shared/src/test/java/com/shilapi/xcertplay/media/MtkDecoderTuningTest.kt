@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.media
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,6 +39,43 @@ class MtkDecoderTuningTest {
         assertEquals(
             MtkDecoderMode.NONE,
             appliedMtkDecoderMode(MtkDecoderMode.LOW_LATENCY_NO_REORDER, "c2.mtk.hevc.decoder"),
+        )
+    }
+
+    @Test fun dedicatedCodec2LowLatencyDecoderIsPreferredForH264() {
+        assertEquals(
+            MtkDecoderCandidate("c2.mtk.avc.decoder.lowlatency", lowLatency = true),
+            MtkDecoderTuning.selectedDecoder(listOf(
+                MtkDecoderCandidate("c2.mtk.avc.decoder"),
+                MtkDecoderCandidate("c2.mtk.avc.decoder.lowlatency", lowLatency = true),
+                MtkDecoderCandidate("OMX.MTK.VIDEO.DECODER.AVC"),
+            )),
+        )
+    }
+
+    @Test fun codec2ComponentNameCanIdentifyLowLatencyWhenTheFeatureFlagIsMissing() {
+        assertTrue(MtkDecoderTuning.isCodec2LowLatencyDecoder(
+            "c2.mtk.hevc.decoder.lowlatency",
+            advertisesLowLatency = false,
+        ))
+        assertFalse(MtkDecoderTuning.isCodec2LowLatencyDecoder(
+            "c2.mtk.hevc.decoder",
+            advertisesLowLatency = false,
+        ))
+    }
+
+    @Test fun legacyKeysAreOnlyOfferedWhenOmxIsTheDefaultMtkDecoder() {
+        assertEquals(
+            MtkDecoderCandidate("OMX.MTK.VIDEO.DECODER.AVC"),
+            MtkDecoderTuning.selectedDecoder(listOf(
+                MtkDecoderCandidate("OMX.MTK.VIDEO.DECODER.AVC"),
+            )),
+        )
+        assertNull(
+            MtkDecoderTuning.selectedDecoder(listOf(
+                MtkDecoderCandidate("c2.mtk.avc.decoder"),
+                MtkDecoderCandidate("OMX.MTK.VIDEO.DECODER.AVC"),
+            )),
         )
     }
 

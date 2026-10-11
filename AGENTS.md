@@ -75,30 +75,34 @@ upstream is merged.
 
 ### Audio focus and physical volume keys
 
-The **Steering-wheel media-key focus (experimental)** setting controls whether `CarPlayMediaKeys`
-requests permanent Android media focus. It is off by default on this branch. When DiPlay owns audio
+The **Disable media-key audio focus (experimental)** setting controls whether `CarPlayMediaKeys`
+requests permanent Android media focus. Follow the upstream opt-out contract: the setting is off
+by default, so permanent media-key focus is enabled unless the driver disables it. When DiPlay owns audio
 focus on the reference firmware, the physical volume buttons are routed to DiPlay. DiPlay does not
 implement vehicle volume adjustment for those events, so the driver can no longer change volume.
-With the setting off, the active media session remains available while the head unit continues
+With the setting on, the active media session remains available while the head unit continues
 routing volume buttons to its music-volume path. Other head units that require focus to deliver
-play/pause or track keys can opt in; the setting applies at the next CarPlay connection.
+play/pause or track keys retain the upstream default; the setting applies at the next CarPlay connection.
 
-Do not turn media-key audio focus on by default solely to match upstream behavior or tests. Cover
-both setting states: disabled must leave `focusRequest` null, while enabled must preserve safe focus
+The branch follows the upstream audio-focus implementation at the user's request. Cover
+both setting states: disabling focus must leave `focusRequest` null, while enabled focus must preserve safe focus
 forwarding and stale-controller isolation. Validate physical volume buttons separately from
 play/pause, next/previous and CarPlay audio playback.
 
 ### Experimental MediaTek decoder tuning
 
-The S202 platform is MediaTek-based. Advanced settings may expose **MTK decoder low latency
-(experimental)** only when Android's first decoder for the selected H.264/HEVC format has an
-`OMX.MTK.` component name. The published `vdec-*` bridge is an ACodec/OMX extension; detecting a
-`c2.mtk.` Codec2 decoder alone is not enough to expose or apply it. The option is off by default and
+The S202 platform is MediaTek-based. Follow the upstream **MTK decoder low latency
+(experimental)** implementation: prefer a dedicated `c2.mtk.` low-latency decoder when available,
+otherwise expose legacy tuning when Android's first decoder for the selected H.264/HEVC format has
+an `OMX.MTK.` component name. A dedicated Codec2 decoder must advertise low latency or have the
+`.lowlatency` / `.low_latency` suffix. The published `vdec-*` bridge is an ACodec/OMX extension;
+never send these keys to a Codec2 decoder. The option is off by default and
 applies only to the main CarPlay screen at the next connection.
 
-Preserve its ordered fallback contract:
+Preserve its upstream selection and fallback contract:
 
-1. Try MTK's legacy `vdec-lowlatency` and `vdec-no-record` (no-reorder) ACodec keys together.
+1. Prefer a dedicated MTK Codec2 low-latency component. For the default legacy OMX decoder, try
+   `vdec-lowlatency` and `vdec-no-record` (no-reorder) ACodec keys together.
 2. If configuration fails, retry with `vdec-lowlatency` only.
 3. If that fails, retry the existing standard tuned format without MTK keys.
 4. Retain the existing operating-rate and minimal-format fallbacks. A runtime codec failure or
@@ -130,7 +134,8 @@ Before reporting a Changan adaptation or upstream merge as complete, check all o
 addition to the normal CI command:
 
 1. IPv4 remains preferred for a dual-stack `ap0` and the iPhone receives `192.168.43.1`.
-2. Media-key audio focus remains optional and off by default, so it cannot capture the physical volume keys after an upgrade.
+2. Media-key audio focus follows upstream's opt-out default; enabling its disable setting leaves
+   focus unclaimed. Verify physical volume buttons on the head unit with that setting enabled.
 3. API 28 paths do not require missing VPN consent, DocumentsUI or other optional AOSP activities.
 4. Diagnostics and proposed fixes do not assume root access.
 5. The built/tested APK comes from `mobile`, and its package/variant/signing identity is recorded.

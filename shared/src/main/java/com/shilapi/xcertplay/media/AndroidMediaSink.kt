@@ -17,6 +17,7 @@ import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.MediaSink
+import com.shilapi.xcertplay.telecom.PhoneAudioRoute
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
@@ -661,7 +662,9 @@ class AndroidMediaSink(
         if (existing?.format == format) return existing
         existing?.close()
         // A replacement owns a fresh ring: the old worker can still finish a blocking write.
-        val echoReference = if (callEchoCancellation && format.audioType == TELEPHONY_AUDIO_TYPE && format.sampleRate > 0) {
+        // The car's phone audio state cancels the echo itself; a second canceller would work against it.
+        val echoReference = if (callEchoCancellation && format.audioType == TELEPHONY_AUDIO_TYPE && format.sampleRate > 0 &&
+            !PhoneAudioRoute.carPlayCallsUseCarAudio()) {
             EchoReference(format.sampleRate).also { callEchoReferences[id] = it }
         } else {
             callEchoReferences.remove(id)
@@ -879,6 +882,7 @@ private class VideoDecoder(
         MtkDecoderMode.LOW_LATENCY_NO_REORDER
     } else MtkDecoderMode.NONE
     private var configuredMtkMode = MtkDecoderMode.NONE
+    private var configuredMtkCodec2LowLatency = false
     // Whether the vendor low-latency parameters were set on the codec being configured.
     private var configuredVendorLowLatency = false
     // Likewise the low-latency decoder, not tried again once another decoder had to take over; and what the
@@ -1042,7 +1046,10 @@ private class VideoDecoder(
         if (running) reportFailure("stage=$stage", error)
         // MTK vendor failures may surface as CodecException or the broader IllegalStateException.
         // Retire the active experimental mode before recreating the decoder.
-        if (error is IllegalStateException) dropMtkTuning("codec failed during $stage")
+        if (error is IllegalStateException) {
+            dropMtkTuning("codec failed during $stage")
+            dropMtkCodec2LowLatency("codec failed during $stage")
+        }
         // A codec can accept the rate and still fail once it runs (start errors may surface on
         // later calls): one that failed before its first frame with it is not given it again.
         if (configuredRate > 0 && !renderedFrameLogged && error is MediaCodec.CodecException) {
@@ -1126,14 +1133,20 @@ private class VideoDecoder(
         }
         val requestedRate = operatingRate
         val atOnce = framesAtOnce && codec == VideoCodec.H264
-        val requestedLowLatency = if (atOnce && !lowLatencyDecoderRefused) findLowLatencyDecoder(mime) else null
+        val requestedMtkCodec2 = if (mtkDecoderTuningEnabled && !lowLatencyDecoderRefused) {
+            MtkDecoderTuning.codec2LowLatencyDecoderName(mime)
+        } else null
+        val requestedLowLatency = requestedMtkCodec2
+            ?: if (atOnce && !lowLatencyDecoderRefused) findLowLatencyDecoder(mime) else null
+        val requestedMtkMode = if (mtkDecoderTuningEnabled &&
+            MtkDecoderTuning.legacyAcodecDecoderName(mime) != null) maximumMtkMode else MtkDecoderMode.NONE
         var configured: ConfiguredVideoDecoder? = null
         var used: DecoderAttempt? = null
         for (attempt in videoDecoderAttempts(
             requestedRate,
             softwareDecoderName(mime),
             requestedLowLatency,
-            maximumMtkMode,
+            requestedMtkMode,
         )) {
             configured = tryConfigure(mime, csd, surface, attempt, atOnce)
             if (configured != null) { used = attempt; break }
@@ -1155,9 +1168,11 @@ private class VideoDecoder(
         }
         configuredRate = used?.operatingRate ?: 0
         configuredMtkMode = configured?.mtkMode ?: MtkDecoderMode.NONE
+        configuredMtkCodec2LowLatency = configured != null && requestedMtkCodec2 != null &&
+            configured.codecName.equals(requestedMtkCodec2, ignoreCase = true)
         if (configured != null && MtkDecoderTuning.supportsLegacyAcodecKeys(configured.codecName) &&
-            configuredMtkMode.ordinal < maximumMtkMode.ordinal) {
-            report("MTK decoder tuning fell back at configure from=${maximumMtkMode.diagnosticName} " +
+            configuredMtkMode.ordinal < requestedMtkMode.ordinal) {
+            report("MTK decoder tuning fell back at configure from=${requestedMtkMode.diagnosticName} " +
                 "to=${configuredMtkMode.diagnosticName}")
             maximumMtkMode = configuredMtkMode
         }
@@ -1166,9 +1181,12 @@ private class VideoDecoder(
             val lowLatency = if (vendorLowLatency) " vendorLowLatency=$configuredVendorLowLatency" else ""
             val output = if (outputThread != null) " outputThread=true" else ""
             val atOnceReport = if (atOnce) " lowLatency=$startedLowLatency pictureOrder=$startedPictureOrder" else ""
-            val mtk = if (MtkDecoderTuning.isDecoderName(configured.codecName)) {
-                " mtkTuning=${configuredMtkMode.diagnosticName}"
-            } else ""
+            val mtk = when {
+                configuredMtkCodec2LowLatency -> " mtkTuning=codec2-low-latency"
+                MtkDecoderTuning.isDecoderName(configured.codecName) ->
+                    " mtkTuning=${configuredMtkMode.diagnosticName}"
+                else -> ""
+            }
             report("decoder=${configured.codecName} mime=$mime size=${width}x$height" +
                 "$rate$lowLatency$output$atOnceReport$mtk")
             Log.i(
@@ -1190,6 +1208,13 @@ private class VideoDecoder(
         if (fallback.ordinal < maximumMtkMode.ordinal) maximumMtkMode = fallback
         report("MTK decoder tuning ${previous.diagnosticName} dropped: $reason; " +
             "next=${fallback.diagnosticName}")
+    }
+
+    private fun dropMtkCodec2LowLatency(reason: String) {
+        if (!configuredMtkCodec2LowLatency) return
+        configuredMtkCodec2LowLatency = false
+        lowLatencyDecoderRefused = true
+        report("MTK Codec2 low-latency decoder dropped: $reason; next=default")
     }
 
     private fun buildFormat(
@@ -1416,12 +1441,13 @@ private class VideoDecoder(
                 "video decoder first input avcc=${nalus.size} annexB=${annexB.size}",
             )
         }
-        val index = VideoInputPump.acquire(
+        val index = DecoderInputPump.acquire(
             running = { running }, drain = { if (outputThread == null) drainOutput(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
         )
         if (index < 0) {
             dropMtkTuning("video decoder input stalled")
+            dropMtkCodec2LowLatency("video decoder input stalled")
             recover("video decoder input stalled")
             return
         }
@@ -1578,6 +1604,7 @@ private class VideoDecoder(
         }
         configuredRate = 0
         configuredMtkMode = MtkDecoderMode.NONE
+        configuredMtkCodec2LowLatency = false
         if (codec != null) {
             try {
                 codec.stop()
@@ -2130,7 +2157,13 @@ private class AudioRenderer(
     private fun feedCodec(payload: ByteArray, presentationTimeUs: Long) {
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
-        val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        // While a blocking track write holds this thread, decoded output fills up and the decoder
+        // stops taking input. Dropping the packet after one 10 ms wait cut ~21 ms of music every
+        // 10-20 s on DiLink 3.0 (#381); drain the output and keep waiting instead.
+        val index = DecoderInputPump.acquire(
+            running = { running }, drain = { drainCodec(codec) },
+            dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+        )
         if (index < 0) {
             inputDropped++
             if (inputDropped == 1) {

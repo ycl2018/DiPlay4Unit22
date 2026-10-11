@@ -32,9 +32,9 @@ import kotlin.math.roundToInt
  * Steering-wheel and other hardware media buttons for CarPlay.
  *
  * Android delivers media keys to a media session; some head units pick the session of the
- * audio-focus owner. DiPlay always keeps an active session while CarPlay media is active and can
- * optionally hold focus for head units that require it. Keys go to the iPhone as CarPlay media HID
- * presses ([CarPlayMediaButton]).
+ * audio-focus owner. DiPlay normally holds focus and an active session until the CarPlay session
+ * ends, but focus can be disabled on head units that otherwise route physical volume buttons to
+ * DiPlay. Keys go to the iPhone as CarPlay media HID presses ([CarPlayMediaButton]).
  */
 internal object CarPlayMediaKeys {
     private const val TAG = "DiPlay-MediaKeys"
@@ -77,6 +77,7 @@ internal object CarPlayMediaKeys {
         }
         appContext = context.applicationContext
         controller = next
+        GeelyWheelKeys.start(context)
         com.shilapi.xcertplay.media.AmbientMusicController.claimPlaybackOwner(next)
         next.playbackListener = { playing ->
             com.shilapi.xcertplay.media.AmbientMusicController.phonePlaybackChanged(next, playing)
@@ -98,6 +99,7 @@ internal object CarPlayMediaKeys {
         expected.nowPlayingListener = null
         expected.artworkListener = null
         controller = null
+        GeelyWheelKeys.stop()
         releaseLocked()
     }
 
@@ -269,9 +271,16 @@ internal object CarPlayMediaKeys {
     }
 
     private fun start(context: Context) {
-        val focusEnabled = AirPlayPersistence.loadMediaKeyAudioFocus(context)
-        val granted = if (focusEnabled) {
-            val expectedController = controller ?: return
+        val expectedController = controller ?: return
+        val focusDisabled = AirPlayPersistence.loadDisableMediaKeyAudioFocus(context)
+        val granted = if (focusDisabled) {
+            // Some OEMs route physical volume buttons to the focus owner. Keep an active
+            // MediaSession without permanent focus so those buttons remain vehicle-owned.
+            focusOwner = null
+            focusRequest = null
+            focusHeld = false
+            false
+        } else {
             val owner = Any().also { focusOwner = it }
             focusEventRevision = 0L
             val audio = context.getSystemService(AudioManager::class.java)
@@ -289,20 +298,13 @@ internal object CarPlayMediaKeys {
                 focusHeld = it
                 if (it) forwardGrantedFocusLocked()
             }
-        } else {
-            // Some OEMs route physical volume keys to the focus owner. Keep an active MediaSession
-            // without permanent focus so those keys remain vehicle-owned.
-            focusOwner = null
-            focusRequest = null
-            focusHeld = false
-            false
         }
         session = MediaSession(context, "DiPlay CarPlay").apply {
             setCallback(callback, mainHandler)
             setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
             isActive = true
         }
-        Log.i(TAG, "media keys active focusEnabled=$focusEnabled focusGranted=$granted")
+        Log.i(TAG, "media keys active focusDisabled=$focusDisabled focusGranted=$granted")
     }
 
     private fun forwardGrantedFocusLocked() {
@@ -389,6 +391,15 @@ internal object CarPlayMediaKeys {
         }
         val sent = synchronized(this) { controller }?.sendMediaButton(index) ?: false
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
+    }
+
+    /** A steering-wheel media key captured outside the Android key stream (Geely/Lynk). */
+    internal fun onExternalMediaKey(index: Int) = send(index, "geely-wheel")
+
+    /** The steering-wheel microphone key captured outside the Android key stream (Geely/Lynk). */
+    internal fun onExternalSiriKey(): Boolean {
+        val active = synchronized(this) { controller } ?: return false
+        return runCatching { active.requestSiri() }.getOrDefault(false)
     }
 
     private val callback = CarPlayMediaCallback(

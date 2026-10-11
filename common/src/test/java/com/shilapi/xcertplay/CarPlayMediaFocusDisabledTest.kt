@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import android.media.session.MediaSession
 import android.os.Looper
+import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import org.junit.After
 import org.junit.Before
@@ -14,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
@@ -21,7 +23,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
 
-/** Changan S202 keeps media keys active without owning audio focus so volume stays vehicle-owned. */
+/** An opt-in compatibility mode keeps media keys active without owning audio focus. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [25, 28, 33], manifest = Config.NONE)
 @LooperMode(LooperMode.Mode.PAUSED)
@@ -30,13 +32,13 @@ class CarPlayMediaFocusDisabledTest {
     private val controllers = mutableListOf<CarPlayController>()
 
     @Before fun disableMediaKeyFocus() {
-        AirPlayPersistence.saveMediaKeyAudioFocus(app, false)
+        AirPlayPersistence.saveDisableMediaKeyAudioFocus(app, true)
     }
 
     @After fun cleanup() {
         controllers.forEach(CarPlayMediaKeys::detach)
         CarPlayBackgroundSession.clear()
-        AirPlayPersistence.saveMediaKeyAudioFocus(app, false)
+        AirPlayPersistence.saveDisableMediaKeyAudioFocus(app, false)
         shadowOf(Looper.getMainLooper()).idle()
     }
 
@@ -84,6 +86,7 @@ class CarPlayMediaFocusDisabledTest {
     }
 
     private fun start(controller: CarPlayController): MediaSession {
+        `when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
         CarPlayMediaKeys.attach(app, controller)
         CarPlayMediaKeys.onMediaAudioChanged(true)
         shadowOf(Looper.getMainLooper()).idle()

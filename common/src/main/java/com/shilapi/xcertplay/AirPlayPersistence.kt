@@ -6,6 +6,7 @@ import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
+import com.shilapi.xcertplay.airplay.ClusterSpeedometerOverlay
 import com.shilapi.xcertplay.airplay.ClusterTurnCardOverlay
 import com.shilapi.xcertplay.airplay.CarPlayUiScale
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
@@ -45,7 +46,7 @@ object AirPlayPersistence {
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_AUDIO_FOCUS_ENABLED = "audio_focus_enabled"
     private const val KEY_AUDIO_FOCUS_AUTO_YIELD = "audio_focus_auto_yield"
-    private const val KEY_MEDIA_KEY_AUDIO_FOCUS = "media_key_audio_focus"
+    private const val KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS = "disable_media_key_audio_focus"
     private const val KEY_MEDIA_AUDIO_CHANNEL = "media_audio_channel"
     private const val KEY_NAVIGATION_AUDIO_CHANNEL = "navigation_audio_channel"
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
@@ -69,6 +70,7 @@ object AirPlayPersistence {
     private const val KEY_FPS = "display_fps"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
+    private const val KEY_SPEECH_WITHOUT_8_16_KHZ = "speech_without_8_16_khz"
     private const val KEY_CAR_BLUETOOTH_AUDIO = "car_bluetooth_audio"
     private const val KEY_CALL_ECHO_CANCELLATION = "call_echo_cancellation"
     private const val KEY_CALL_VOICE_FILTER = "call_voice_filter"
@@ -102,7 +104,9 @@ object AirPlayPersistence {
     private const val KEY_RIGHT_HAND_DRIVE = "right_hand_drive"
     private const val KEY_HIDE_TOP_BAR = "hide_top_bar"
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
+    private const val KEY_HARMAN_FULLSCREEN = "harman_fullscreen"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
+    private const val KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA = "main_display_disable_safe_area"
     private const val KEY_ADAPT_PIP_RESOLUTION = "adapt_pip_resolution"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_BT_SUSPEND_DURING_CARPLAY = "bt_suspend_during_carplay"
@@ -243,14 +247,14 @@ object AirPlayPersistence {
             .apply()
     }
 
-    /** Permanent focus for the media-key session; off by default for head units that reroute volume keys. */
-    fun loadMediaKeyAudioFocus(context: Context): Boolean =
+    /** Opt-out for head units that route physical volume buttons to DiPlay's focus owner. */
+    fun loadDisableMediaKeyAudioFocus(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_MEDIA_KEY_AUDIO_FOCUS, false)
+            .getBoolean(KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS, false)
 
-    fun saveMediaKeyAudioFocus(context: Context, enabled: Boolean) {
+    fun saveDisableMediaKeyAudioFocus(context: Context, disabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_MEDIA_KEY_AUDIO_FOCUS, enabled)
+            .putBoolean(KEY_DISABLE_MEDIA_KEY_AUDIO_FOCUS, disabled)
             .apply()
     }
 
@@ -615,6 +619,14 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_MAIN_BUFFERED_AUDIO, enabled).apply()
     }
 
+    /** Do not offer 8 and 16 kHz PCM for navigation prompts and alerts; applies at reconnect. */
+    fun loadSpeechWithout8And16Khz(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SPEECH_WITHOUT_8_16_KHZ, false)
+
+    fun saveSpeechWithout8And16Khz(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SPEECH_WITHOUT_8_16_KHZ, enabled).apply()
+    }
+
     /** Offer no CarPlay audio, so the iPhone keeps audio on its Bluetooth link with the car; applies at reconnect. */
     fun loadCarBluetoothAudio(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CAR_BLUETOOTH_AUDIO, false)
@@ -780,6 +792,59 @@ object AirPlayPersistence {
 
     fun saveLauncherMapSharing(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LAUNCHER_MAP_SHARING, enabled).apply()
+    }
+
+    fun loadClusterSpeedometerEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("cluster_speedometer_enabled", false)
+
+    fun saveClusterSpeedometerEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("cluster_speedometer_enabled", enabled).apply()
+    }
+
+    internal fun observeClusterSpeedometer(context: Context, changed: () -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key?.startsWith("cluster_speedometer_") == true) changed()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun loadClusterSpeedometerX(context: Context): Int =
+        ClusterSpeedometerOverlay.snap(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("cluster_speedometer_x", ClusterSpeedometerOverlay.DEFAULT_X_PERCENT), ClusterSpeedometerOverlay.xPercents)
+
+    fun saveClusterSpeedometerX(context: Context, value: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("cluster_speedometer_x", ClusterSpeedometerOverlay.snap(value, ClusterSpeedometerOverlay.xPercents)).apply()
+    }
+
+    fun loadClusterSpeedometerY(context: Context): Int =
+        ClusterSpeedometerOverlay.snap(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("cluster_speedometer_y", ClusterSpeedometerOverlay.DEFAULT_Y_PERCENT), ClusterSpeedometerOverlay.yPercents)
+
+    fun saveClusterSpeedometerY(context: Context, value: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("cluster_speedometer_y", ClusterSpeedometerOverlay.snap(value, ClusterSpeedometerOverlay.yPercents)).apply()
+    }
+
+    fun loadClusterSpeedometerSize(context: Context): Int =
+        ClusterSpeedometerOverlay.snap(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("cluster_speedometer_size", ClusterSpeedometerOverlay.DEFAULT_SIZE_PERCENT), ClusterSpeedometerOverlay.sizePercents)
+
+    fun saveClusterSpeedometerSize(context: Context, value: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("cluster_speedometer_size", ClusterSpeedometerOverlay.snap(value, ClusterSpeedometerOverlay.sizePercents)).apply()
+    }
+
+    fun loadClusterSpeedometerOpacity(context: Context): Int =
+        ClusterSpeedometerOverlay.snap(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("cluster_speedometer_opacity", ClusterSpeedometerOverlay.DEFAULT_OPACITY_PERCENT), ClusterSpeedometerOverlay.opacityPercents)
+
+    fun saveClusterSpeedometerOpacity(context: Context, value: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("cluster_speedometer_opacity", ClusterSpeedometerOverlay.snap(value, ClusterSpeedometerOverlay.opacityPercents)).apply()
     }
 
     /** Observe consent changes for already attached launcher maps; call the returned function to unregister. */
@@ -1187,6 +1252,16 @@ object AirPlayPersistence {
             .apply()
     }
 
+    fun loadHarmanFullscreen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_HARMAN_FULLSCREEN, false)
+
+    fun saveHarmanFullscreen(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_HARMAN_FULLSCREEN, enabled)
+            .apply()
+    }
+
     fun loadSafeAreaDrawOutside(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_SAFE_AREA_DRAW_OUTSIDE, true)
@@ -1194,6 +1269,17 @@ object AirPlayPersistence {
     fun saveSafeAreaDrawOutside(context: Context, drawOutside: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_SAFE_AREA_DRAW_OUTSIDE, drawOutside)
+            .apply()
+    }
+
+    /** Off by default: square full-screen video is for screens that show a gap or wallpaper corners (#578, #586). */
+    fun loadMainDisplayDisableSafeArea(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA, false)
+
+    fun saveMainDisplayDisableSafeArea(context: Context, disable: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_MAIN_DISPLAY_DISABLE_SAFE_AREA, disable)
             .apply()
     }
 

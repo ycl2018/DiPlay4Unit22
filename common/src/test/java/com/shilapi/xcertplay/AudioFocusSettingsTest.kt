@@ -18,6 +18,8 @@ class AudioFocusSettingsTest {
     @Test fun transientMuteIsOneDependentOptionAndRetainsPreferenceWhenFocusIsOff() {
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
         activity.setTheme(android.R.style.Theme_Material_NoActionBar)
+        activity.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
+        assertFalse(AirPlayPersistence.loadDisableMediaKeyAudioFocus(activity))
         AirPlayPersistence.saveAudioFocusEnabled(activity, false)
         AirPlayPersistence.saveAudioFocusAutoYield(activity, false)
         val page = LinearLayout(activity)
@@ -26,15 +28,15 @@ class AudioFocusSettingsTest {
         activity.setContentView(page)
         val switches = views(page).filterIsInstance<Switch>().toList()
         assertEquals(3, switches.size)
-        val mediaKeys = switches.single {
-            it.contentDescription == activity.getString(R.string.settings_media_key_audio_focus)
+        val disableMediaKeyFocus = switches.single {
+            it.contentDescription == activity.getString(R.string.settings_disable_media_key_audio_focus)
         }
         val focus = switches.single { it.contentDescription == activity.getString(R.string.contrib_audio_home_toggle_audio_focus) }
         val mute = switches.single { it.contentDescription == activity.getString(R.string.audio_focus_auto_yield) }
         val dependent = mute.parent.parent as View
         assertEquals(View.GONE, dependent.visibility)
-        mediaKeys.isChecked = true
-        assertTrue(AirPlayPersistence.loadMediaKeyAudioFocus(activity))
+        disableMediaKeyFocus.isChecked = true
+        assertTrue(AirPlayPersistence.loadDisableMediaKeyAudioFocus(activity))
         assertEquals(View.GONE, dependent.visibility)
         focus.isChecked = true
         assertEquals(View.VISIBLE, dependent.visibility)
