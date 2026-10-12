@@ -89,6 +89,15 @@ both setting states: disabling focus must leave `focusRequest` null, while enabl
 forwarding and stale-controller isolation. Validate physical volume buttons separately from
 play/pause, next/previous and CarPlay audio playback.
 
+### Siri microphone source
+
+On the reference S202, use `VOICE_COMMUNICATION` for `speechrecognition` capture without changing
+Siri into a telephony stream. Real logs measured `VOICE_RECOGNITION` at about four times the
+requested PCM rate, while two CarPlay calls proved `VOICE_COMMUNICATION` stays at the requested
+rate. Keep the override gated by both `spm8666p1_64_car` and `mt8666`. Siri must not enter
+`MODE_IN_COMMUNICATION` or acquire the call-only echo/noise processing merely because it shares the
+working capture source.
+
 ### Experimental MediaTek decoder tuning
 
 The S202 platform is MediaTek-based. Follow the upstream **MTK decoder low latency

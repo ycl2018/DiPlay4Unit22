@@ -67,6 +67,25 @@ class CarPlayMediaCallbackTest {
         assertEquals(listOf(CarPlayMediaButton.NEXT), sent)
     }
 
+    @Test fun mediaSessionReportsMappedAndUnmappedPhysicalKeys() {
+        val diagnosed = mutableListOf<Triple<KeyEvent, Boolean, String>>()
+        val callback = CarPlayMediaCallback(
+            diagnose = { event, consumed, handler -> diagnosed += Triple(event, consumed, handler) },
+        ) { _, _ -> }
+        val mapped = KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT, 0)
+        val unmapped = KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0)
+
+        assertEquals(true, callback.onMediaButtonEvent(button(mapped)))
+        val unmappedConsumed = callback.onMediaButtonEvent(button(unmapped))
+
+        assertEquals(mapped, diagnosed[0].first)
+        assertEquals(true, diagnosed[0].second)
+        assertEquals("media-button-${CarPlayMediaButton.NEXT}", diagnosed[0].third)
+        assertEquals(unmapped, diagnosed[1].first)
+        assertEquals(unmappedConsumed, diagnosed[1].second)
+        assertEquals("unmapped-media", diagnosed[1].third)
+    }
+
     @Test
     fun nowPlayingFieldsBecomeAndroidMediaMetadata() {
         val artwork = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)

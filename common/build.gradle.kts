@@ -3,6 +3,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Parallel Robolectric forks are opt-in because each fork may use up to 1 GiB.
+val unitTestForks = providers.environmentVariable("DIPLAY_TEST_FORKS").orNull
+    ?.toIntOrNull()?.coerceIn(1, 8) ?: 1
+
 android {
     namespace = "com.shilapi.xcertplay.host"
     compileSdk {
@@ -25,7 +29,10 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         // The UI suite covers several SDKs and locale-specific resource sandboxes.
-        unitTests.all { it.maxHeapSize = "1g" }
+        unitTests.all {
+            it.maxHeapSize = "1g"
+            it.maxParallelForks = unitTestForks
+        }
     }
 }
 

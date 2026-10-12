@@ -37,6 +37,7 @@ class WheelKeyServiceTest {
         service = Robolectric.buildService(WheelKeyService::class.java).create().get()
         service.getSharedPreferences("diplay_navigation_wheel", Context.MODE_PRIVATE).edit().clear().commit()
         service.getSharedPreferences("diplay_wheel_map_zoom", Context.MODE_PRIVATE).edit().clear().commit()
+        KeyEventDiagnostics.clear(service)
         service.mapRoute = { route }
         WheelZoomSettings.setEnabled(service, true)
         WheelZoomSettings.assign(service, WheelZoomSettings.Role.MODE, WheelKey(KeyEvent.KEYCODE_F1, 0, "?"))
@@ -50,6 +51,32 @@ class WheelKeyServiceTest {
         BydOutputSettings.setCarPlayCallControls(service, false)
         BydCarPlayCall.end()
         CarPlayBackgroundSession.clear()
+        KeyEventDiagnostics.clear(service)
+    }
+
+    @Test fun accessibilityKeyDecisionIsSentToDiagnosticLogger() {
+        data class Logged(val source: String, val event: KeyEvent, val consumed: Boolean, val handler: String)
+        val logged = mutableListOf<Logged>()
+        service.keyEventLogger = { _, source, event, consumed, handler ->
+            logged += Logged(source, event, consumed, handler)
+        }
+        assertFalse(key(KeyEvent.KEYCODE_F3, true))
+
+        assertEquals(1, logged.size)
+        assertEquals("accessibility", logged.single().source)
+        assertEquals(KeyEvent.ACTION_DOWN, logged.single().event.action)
+        assertEquals(KeyEvent.KEYCODE_F3, logged.single().event.keyCode)
+        assertFalse(logged.single().consumed)
+        assertEquals("vehicle", logged.single().handler)
+    }
+
+    @Test fun unconsumedVolumeKeySurvivesDiagnosticRedaction() {
+        assertFalse(key(KeyEvent.KEYCODE_VOLUME_UP, true))
+
+        val report = KeyEventDiagnostics.report(service)
+        assertTrue(report, report.contains("source=accessibility action=DOWN keyCode=24("))
+        assertTrue(report, report.contains("consumed=false handler=vehicle"))
+        assertEquals(report, DiagnosticRedactor.redact(report))
     }
 
     private val knobs = mutableListOf<com.shilapi.xcertplay.airplay.AirPlayKnobState>()

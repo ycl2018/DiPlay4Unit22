@@ -11,6 +11,8 @@ import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.MicrophoneCounters
 import com.shilapi.xcertplay.airplay.MicrophonePacketizer
+import com.shilapi.xcertplay.network.ChanganS202HeadUnit
+import com.shilapi.xcertplay.network.GeelyHeadUnit
 import java.io.Closeable
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -75,18 +77,13 @@ internal class MicrophoneUplink(
             return false
         }
 
-        val source = when {
-            config.audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
-            config.audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-            // The Geely/Lynk head unit only opens the microphone for the voice-communication
-            // source; its voice-recognition source records silence, so Siri never hears.
-            config.audioType == "speechrecognition" ->
-                if (com.shilapi.xcertplay.network.GeelyHeadUnit.detected) {
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                } else {
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION
-                }
-            else -> MediaRecorder.AudioSource.MIC
+        // Geely records silence through VOICE_RECOGNITION. On the Changan S202 that source returned
+        // almost exactly four seconds of PCM per wall-clock second in every measured Siri session,
+        // while two real calls proved VOICE_COMMUNICATION has the requested rate on the same car.
+        val speechUsesCommunication = GeelyHeadUnit.detected || ChanganS202HeadUnit.detected
+        val source = microphoneAudioSource(config.audioType, speakerphoneCall, speechUsesCommunication)
+        if (config.audioType == "speechrecognition" && source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+            stats.useVoiceCommunicationSource()
         }
         val nextEncoder = if (config.codec == AudioCodecKind.OPUS) {
             opusEncoderFactory(config.bitrate ?: 48_000)
@@ -488,6 +485,18 @@ internal class MicrophoneUplink(
         const val MAX_READ_RESTARTS = 3
         const val READ_RESTART_PAUSE_MILLIS = 50L
     }
+}
+
+internal fun microphoneAudioSource(
+    audioType: String,
+    speakerphoneCall: Boolean,
+    speechUsesCommunication: Boolean,
+): Int = when {
+    audioType == "telephony" && speakerphoneCall -> MediaRecorder.AudioSource.MIC
+    audioType == "telephony" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+    audioType == "speechrecognition" && speechUsesCommunication -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+    audioType == "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    else -> MediaRecorder.AudioSource.MIC
 }
 
 /**

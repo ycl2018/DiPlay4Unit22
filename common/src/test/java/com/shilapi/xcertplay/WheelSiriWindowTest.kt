@@ -47,6 +47,7 @@ class WheelSiriWindowTest {
         settings = Robolectric.buildActivity(DiPlayActivity::class.java).get()
         host.getSharedPreferences("diplay_wheel_map_zoom", Context.MODE_PRIVATE).edit().clear().commit()
         host.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE).edit().clear().commit()
+        KeyEventDiagnostics.clear(host)
         WheelZoomSettings.setSiriKey(host, true)
         WheelZoomSettings.assign(host, WheelZoomSettings.Role.SIRI, WheelKey(KeyEvent.KEYCODE_F6, 0, "?"))
         host.getSystemService(AudioManager::class.java).mode = AudioManager.MODE_NORMAL
@@ -66,6 +67,27 @@ class WheelSiriWindowTest {
         BydCarPlayCall.end()
         CarPlayBackgroundSession.clear()
         host.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE).edit().clear().commit()
+        KeyEventDiagnostics.clear(host)
+    }
+
+    @Test fun hostKeyDecisionsAreRetainedForTheDiagnosticReport() {
+        assertTrue(host.dispatchKeyEvent(key(KeyEvent.KEYCODE_F6, true)))
+
+        val report = KeyEventDiagnostics.report(host)
+        assertTrue(report, report.contains("source=host action=DOWN"))
+        assertTrue(report.contains("keyCode=${KeyEvent.KEYCODE_F6}("))
+        assertTrue(report.contains("consumed=true handler=assigned-siri"))
+    }
+
+    @Test fun assignedSiriKeyLeftToTheVehicleSurvivesDiagnosticRedaction() {
+        field("activeAirPlaySession", null)
+        host.dispatchKeyEvent(key(KeyEvent.KEYCODE_F6, true))
+
+        val report = KeyEventDiagnostics.report(host)
+        assertTrue(report, report.contains("source=host action=DOWN"))
+        assertTrue(report, report.contains("handler=assigned-siri-vehicle"))
+        assertEquals(report, DiagnosticRedactor.redact(report))
+        verify(controller, never()).requestSiri()
     }
 
     @Test fun heldAssignedKeyKeepsItsReleaseAfterCallSessionAndSettingChanges() {

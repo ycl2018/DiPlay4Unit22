@@ -1352,14 +1352,14 @@ class CarPlayHostActivity : ComponentActivity() {
                 legacySiriPresses.remove(physicalKey)
                 requestLegacySiri(event.keyCode)
             }
-            return true
+            return finishKeyDispatch(event, true, "legacy-siri-held")
         }
         // A release/repeat belongs to its original press even if a call, session or setting changed.
         if (downOrUp && siriKeyPresses.hasConsumedPress(physicalKey)) {
             siriKeyPresses.filter(physicalKey, event.action == KeyEvent.ACTION_DOWN, event.repeatCount == 0) {
                 WheelZoomKeys.Action.PASS
             }
-            return true
+            return finishKeyDispatch(event, true, "assigned-siri-held")
         }
         if (!menuOpen &&
             (AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this) ||
@@ -1371,11 +1371,13 @@ class CarPlayHostActivity : ComponentActivity() {
                     "remote key ${KeyEvent.keyCodeToString(event.keyCode)} action=${event.action}",
                 )
             }
-            return true
+            return finishKeyDispatch(event, true, "remote")
         }
 
         // During a CarPlay call the wheel's call key answers on the iPhone instead of opening BYD's phone app.
-        if (CarPlayCallKeys.onKey(this, event.keyCode, event.action == KeyEvent.ACTION_DOWN, controller)) return true
+        if (CarPlayCallKeys.onKey(this, event.keyCode, event.action == KeyEvent.ACTION_DOWN, controller)) {
+            return finishKeyDispatch(event, true, "call")
+        }
 
         // The wheel key service, when it runs, takes an assigned Siri key before this window sees it.
         val assignedKey = WheelZoomSettings.isSiriKey(this, WheelKey.of(event))
@@ -1392,8 +1394,13 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             WheelZoomKeys.Action.CONSUME
         } else WheelZoomKeys.Action.PASS
-        if (assignedAction != WheelZoomKeys.Action.PASS) return true
-        if (downOrUp && assignedKey) return super.dispatchKeyEvent(event)
+        if (assignedAction != WheelZoomKeys.Action.PASS) {
+            return finishKeyDispatch(event, true, "assigned-siri")
+        }
+        if (downOrUp && assignedKey) {
+            val consumed = super.dispatchKeyEvent(event)
+            return finishKeyDispatch(event, consumed, "assigned-siri-vehicle")
+        }
 
         // Steering-wheel next/previous, claimed by the CarPlay screen itself. BYD gives these keys to
         // whichever window is in front, and this is the only route that reaches CarPlay without the
@@ -1411,16 +1418,24 @@ class CarPlayHostActivity : ComponentActivity() {
                 val sent = controller?.sendMediaButton(mediaPress) == true
                 appendLog("Media: wheel key ${event.keyCode} -> CarPlay $mediaPress sent=$sent")
             }
-            return true
+            return finishKeyDispatch(event, true, "window-media-$mediaPress")
         }
 
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
-        if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
+        if (!CarPlayMediaButton.opensSiri(event.keyCode)) {
+            val consumed = super.dispatchKeyEvent(event)
+            return finishKeyDispatch(event, consumed, "system")
+        }
         if (event.action == KeyEvent.ACTION_DOWN) legacySiriPresses.add(physicalKey)
         if (event.action == KeyEvent.ACTION_UP) {
             requestLegacySiri(event.keyCode)
         }
-        return true
+        return finishKeyDispatch(event, true, "legacy-siri")
+    }
+
+    private fun finishKeyDispatch(event: KeyEvent, consumed: Boolean, handler: String): Boolean {
+        KeyEventDiagnostics.record(this, "host", event, consumed, handler)
+        return consumed
     }
 
     private fun requestLegacySiri(keyCode: Int) {

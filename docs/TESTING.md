@@ -1,5 +1,16 @@
 # Test checklist
 
+On a development machine with enough memory, the Robolectric-heavy `common` suite can use
+Gradle-managed parallel test forks:
+
+```sh
+DIPLAY_TEST_FORKS=4 ./gradlew :common:testDebugUnitTest
+```
+
+Each fork may use up to 1 GiB. The default remains one fork for predictable CI and contributor
+machines; accepted values are 1 through 8. Do not start competing Gradle test commands in the same
+checkout because they share test-output directories.
+
 Use the [installation guide](INSTALL.md). With the car parked, verify wired and wireless connection, picture, touch and music. Test disconnect/reconnect, then settings Apply/Cancel. Save a diagnostic report after reproducing an issue.
 
 For the USB trailer, software-window video and RFCOMM reliability changes, complete the
@@ -11,6 +22,14 @@ Record the exact candidate APK and each untested setup before a release.
 In the home settings and the in-session menu, confirm the accepted range is **30–160%**. Try 160%, cancel an edit, save an unrelated setting, and reconnect; the exact saved percentage must survive. Enter 161% in the numeric dialog and confirm it stays open with an error. Reset must only change the draft to 100% until Save/Apply is selected.
 
 On a parked head unit, test a supported setting above 100% with Default, Smaller and Large icon/text sizes. Confirm the display diagnostics show the requested and effective resolution, actual decoder size/rate/alignment support, negotiated canvas and video output. An unsupported enlarged canvas must fall back before advertising it to the phone, with a notice; resolution falls back to 100% if removing the Smaller-size enlargement is insufficient, and 100% is saved for later connections. Compare picture sharpness, touch mapping, audio and sustained video smoothness. Decoder metadata and automated tests cannot establish performance on real hardware, so the contributor's supersampling result needs a signed vehicle retest.
+
+## S202 direct USB authorization
+
+On the parked Android 9 S202 with ADB already authorized, start a wired iPhone connection. Confirm diagnostics contain `USB permission route=ADB; skipping system request` and a successful ADB grant, without a system USB prompt or permission-activity probe. Test both initial attachment and the iPhone's CarPlay USB reenumeration, then unplug/reconnect and reopen DiPlay. With ADB unavailable, confirm the activity probe runs only after the failed grant: a missing/disabled activity must produce a clear connection error, while an available activity must fall back to the system USB dialog. Confirm repeated failed-ADB attempts use `cached=true` even after more than 24 hours or a system clock change; firmware/app updates must force a fresh probe. On other firmware, confirm the normal system USB permission flow remains available. ADB grants apply to the current USB device; no cached result may replace the device permission check. Do not disable SystemUI on a car to simulate these cases.
+
+## S202 Siri microphone
+
+Start Siri from the CarPlay screen and from the assigned wheel key. Confirm the report says `type=speechrecognition source=VOICE_COMMUNICATION` but does not enter Android communication mode or enable call-only echo/noise effects. Speak for at least 10 seconds. In each five-second `Microphone: stats` window at 48 kHz mono, expect about 480,000 `captureBytes` and 250 `udpSent`, no read/send errors, and a non-`silent` `peakDbfs`. End Siri and place a real CarPlay call; its existing `type=telephony source=VOICE_COMMUNICATION` route must remain unchanged. Repeat one Siri test on non-S202 hardware or an emulator and confirm it retains `VOICE_RECOGNITION`.
 
 ## Wi-Fi Direct scan pause
 

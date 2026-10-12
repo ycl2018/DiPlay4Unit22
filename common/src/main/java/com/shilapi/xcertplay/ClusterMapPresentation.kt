@@ -238,7 +238,7 @@ internal class ClusterMapPresentation(
                 ?.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).orEmpty()
             appendLine("presentationDisplayIds=${presentations.joinToString { it.displayId.toString() }}")
             val selected = findDisplay(context)
-            append("selectedCluster=${selected?.let { "${it.displayId}:${it.name}" } ?: "none"}")
+            appendLine("selectedCluster=${selected?.let { "${it.displayId}:${it.name}" } ?: "none"}")
         }
 
         fun sizeOf(display: Display): Point = Point().also {

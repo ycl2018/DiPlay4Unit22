@@ -119,6 +119,25 @@ class MicrophoneSourceFallbackTest {
         assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
     }
 
+    @Test fun compatibilityPolicyChangesOnlySiriCaptureSource() {
+        assertEquals(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            microphoneAudioSource("speechrecognition", speakerphoneCall = false, speechUsesCommunication = false),
+        )
+        assertEquals(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            microphoneAudioSource("speechrecognition", speakerphoneCall = false, speechUsesCommunication = true),
+        )
+        assertEquals(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            microphoneAudioSource("telephony", speakerphoneCall = false, speechUsesCommunication = true),
+        )
+        assertEquals(
+            MediaRecorder.AudioSource.MIC,
+            microphoneAudioSource("telephony", speakerphoneCall = true, speechUsesCommunication = true),
+        )
+    }
+
     private fun config(type: String) = MicrophoneConfig(audioType = type, sampleRate = 16_000,
         channels = 1, payloadType = 100, frameMillis = 20, host = InetAddress.getLoopbackAddress(),
         port = 9, key = ByteArray(32))

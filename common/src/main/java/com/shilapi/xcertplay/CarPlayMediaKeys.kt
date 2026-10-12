@@ -407,6 +407,9 @@ internal object CarPlayMediaKeys {
 
     private val callback = CarPlayMediaCallback(
         experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
+        diagnose = { event, consumed, handler ->
+            appContext?.let { KeyEventDiagnostics.record(it, "media-session", event, consumed, handler) }
+        },
         send = ::send,
     )
 
@@ -517,16 +520,20 @@ internal object CarPlayMediaKeys {
  */
 internal class CarPlayMediaCallback(
     private val experimentalDiLink3Keys: () -> Boolean = { false },
+    private val diagnose: (event: KeyEvent, consumed: Boolean, handler: String) -> Unit = { _, _, _ -> },
     private val send: (index: Int, source: String) -> Unit,
 ) : MediaSession.Callback() {
     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
         @Suppress("DEPRECATION")
         val event = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
         val index = CarPlayMediaButton.forKeyCode(event.keyCode, experimentalDiLink3Keys())
-            ?: return super.onMediaButtonEvent(mediaButtonIntent)
+            ?: return super.onMediaButtonEvent(mediaButtonIntent).also {
+                diagnose(event, it, "unmapped-media")
+            }
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             send(index, KeyEvent.keyCodeToString(event.keyCode))
         }
+        diagnose(event, true, "media-button-$index")
         return true
     }
 

@@ -13,6 +13,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import com.shilapi.xcertplay.adb.AdbKeys
 import com.shilapi.xcertplay.adb.LocalAdb
@@ -62,6 +63,10 @@ class WheelKeyService : AccessibilityService() {
     internal var knob: (AirPlayKnobState) -> Boolean = { CarPlayBackgroundSession.snapshot()?.controller?.sendKnob(it) == true }
     internal var routeActive: () -> Boolean = { CarPlayGlance.snapshot().maneuverType != null }
     internal var requestSiri: () -> Boolean = { CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true }
+    internal var keyEventLogger: (Context, String, KeyEvent, Boolean, String) -> Unit =
+        { context, source, event, consumed, handler ->
+            KeyEventDiagnostics.record(context, source, event, consumed, handler)
+        }
 
     // With the auto-off setting the joystick ends a while after the last press and when a route starts,
     // so the keys go back to music and volume without a thought.
@@ -124,7 +129,9 @@ class WheelKeyService : AccessibilityService() {
     override fun onInterrupt() { settingsChanged() }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
+            return finishKeyEvent(event, false, "unsupported-action")
+        }
         val down = event.action == KeyEvent.ACTION_DOWN
         val physicalKey = PhysicalWheelKey(event.deviceId, event.keyCode, event.scanCode)
         if (keys.hasConsumedPress(physicalKey)) {
@@ -134,14 +141,19 @@ class WheelKeyService : AccessibilityService() {
             keys.onKey(null, down, event.repeatCount == 0, eligibleRoute() != null, calling,
                 physicalKey = physicalKey)
             rearmTimedMode()
-            return true
+            return finishKeyEvent(event, true, "wheel-held")
         }
-        if (navigationKeys.owns(event.keyCode, event.deviceId, event.downTime)) return navigationKey(event)
-        if (CarPlayCallKeys.onKey(this, event.keyCode, down)) return true
+        if (navigationKeys.owns(event.keyCode, event.deviceId, event.downTime)) {
+            val consumed = navigationKey(event)
+            return finishKeyEvent(event, consumed, "navigation-volume-held")
+        }
+        if (CarPlayCallKeys.onKey(this, event.keyCode, down)) {
+            return finishKeyEvent(event, true, "call")
+        }
         if (BydOutputSettings.carPlayCallControls(this) &&
             CarPlayMediaButton.opensSiriWhileCarPlay(event.keyCode) && session() != null) {
             if (!down) Log.i(TAG, "CarPlay voice key ${event.keyCode}: Siri sent=${CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true}")
-            return true
+            return finishKeyEvent(event, true, "carplay-voice")
         }
         val key = WheelKey.of(event)
         refreshEligibility()
@@ -181,7 +193,10 @@ class WheelKeyService : AccessibilityService() {
             },
         )
         when (action) {
-            WheelZoomKeys.Action.PASS -> return navigationKey(event)
+            WheelZoomKeys.Action.PASS -> {
+                val consumed = navigationKey(event)
+                return finishKeyEvent(event, consumed, if (consumed) "navigation-volume" else "vehicle")
+            }
             WheelZoomKeys.Action.CONSUME -> Unit
             WheelZoomKeys.Action.MODE_ON -> announce(zoomOn = true)
             WheelZoomKeys.Action.MODE_OFF -> announce(zoomOn = false)
@@ -189,7 +204,12 @@ class WheelKeyService : AccessibilityService() {
                 controller?.zoomDashboardMap(zoomIn = action == WheelZoomKeys.Action.ZOOM_IN)
         }
         rearmTimedMode()
-        return true
+        return finishKeyEvent(event, true, "wheel-${action.name.lowercase(Locale.US)}")
+    }
+
+    private fun finishKeyEvent(event: KeyEvent, consumed: Boolean, handler: String): Boolean {
+        keyEventLogger(this, "accessibility", event, consumed, handler)
+        return consumed
     }
 
     private fun navigationKey(event: KeyEvent): Boolean = navigationKeys.onKey(

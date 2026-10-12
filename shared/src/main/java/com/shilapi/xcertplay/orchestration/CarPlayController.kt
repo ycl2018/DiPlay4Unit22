@@ -83,6 +83,7 @@ import com.shilapi.xcertplay.transport.forWirelessLink
 import com.shilapi.xcertplay.transport.I2cTransport
 import com.shilapi.xcertplay.transport.I2cTransportException
 import com.shilapi.xcertplay.transport.IphoneCarPlayConfiguration
+import com.shilapi.xcertplay.transport.IphoneUsbAdbGrant
 import com.shilapi.xcertplay.transport.IphoneUsbException
 import com.shilapi.xcertplay.transport.IphoneUsbHost
 import com.shilapi.xcertplay.transport.IphoneUsbMatcher
@@ -208,6 +209,8 @@ class CarPlayController(
     @Volatile private var uiListener: AirPlaySessionListener? = listener
     @Volatile private var uiStatusReporter: ((CarPlayStatus) -> Unit)? = reportStatus
     private val permissionGrant = AtomicBoolean(false)
+    private val usbAdbGrantAttempts = mutableSetOf<String>()
+    private val pendingUsbAdbGrants = mutableSetOf<String>()
     private val availabilityPollGeneration = AtomicInteger(0)
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
@@ -1831,10 +1834,13 @@ class CarPlayController(
         mainHandler.post { doRequestIphonePermission(device) }
     }
 
-    private fun doRequestIphonePermission(device: UsbDevice) {
+    private fun doRequestIphonePermission(device: UsbDevice, preferAdbAuthorization: Boolean = true) {
         if (closed) return
+        // Discovery and USB_DEVICE_ATTACHED may describe the same device while ADB is still
+        // granting it. Keep the original generation alive until that grant completes.
+        if (usbAdbGrantKey(device) in pendingUsbAdbGrants) return
         try {
-            when (val request = iphoneHost.requestPermission(device)) {
+            when (val request = iphoneHost.requestPermission(device, preferAdbAuthorization)) {
                 is IphoneUsbHost.PermissionRequest.AlreadyGranted -> {
                     debugLog("wired iPhone USB permission already granted")
                     permissionGrant.set(false)
@@ -1846,9 +1852,55 @@ class CarPlayController(
                     onStatus(CarPlayStatus.RequestingIphonePermission)
                     pollIphonePermission(device)
                 }
+                is IphoneUsbHost.PermissionRequest.AdbRequired -> {
+                    debugLog("wired iPhone USB permission route=ADB; skipping system request")
+                    permissionGrant.set(false)
+                    permissionPollGeneration++
+                    onStatus(CarPlayStatus.RequestingIphonePermission)
+                    attemptIphoneUsbAdbGrant(request.device)
+                }
+                is IphoneUsbHost.PermissionRequest.UiUnavailable -> {
+                    fail(IphoneUsbException.Protocol("ADB USB authorization failed and the head unit has no usable " +
+                        "USB authorization page; check the head unit's ADB connection and reconnect iPhone"))
+                }
             }
         } catch (error: Throwable) {
             fail(error)
+        }
+    }
+
+    private fun usbAdbGrantKey(device: UsbDevice): String =
+        "$phase:$reenumerationAttempts:${device.deviceName}:${device.deviceId}"
+
+    /** S202 uses the verified shell grant directly, without opening its missing permission UI. */
+    private fun attemptIphoneUsbAdbGrant(device: UsbDevice) {
+        if (!IphoneUsbAdbGrant.supported()) return
+        val key = usbAdbGrantKey(device)
+        if (!usbAdbGrantAttempts.add(key)) {
+            doRequestIphonePermission(device, preferAdbAuthorization = false)
+            return
+        }
+        pendingUsbAdbGrants.add(key)
+        val grantPhase = phase
+        val grantGeneration = permissionPollGeneration
+        connectionDiagnostic("USB permission ADB grant starting phase=$phase reenumerationAttempts=$reenumerationAttempts")
+        executor.execute {
+            val result = runCatching { IphoneUsbAdbGrant.grant(appContext) }
+                .getOrElse { IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.ERROR) }
+            connectionDiagnostic(
+                "USB permission ADB grant result=${result.code} attached=${result.attached} " +
+                    "granted=${result.granted} defaults=${result.defaults}",
+            )
+            mainHandler.post {
+                pendingUsbAdbGrants.remove(key)
+                if (closed || phase != grantPhase || permissionPollGeneration != grantGeneration) return@post
+                if (requireUsbManager().hasPermission(device)) {
+                    onIphonePermission(IphoneUsbHost.PermissionResult.Granted(device))
+                } else {
+                    connectionDiagnostic("USB permission ADB grant unsuccessful result=${result.code}; checking system UI")
+                    doRequestIphonePermission(device, preferAdbAuthorization = false)
+                }
+            }
         }
     }
 

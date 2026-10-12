@@ -12,11 +12,13 @@ import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -62,6 +64,123 @@ class LocalAdbTest {
             assertEquals("Result: Parcel(00000000 00000002   '........')", adb.shell("service call autoservice 5"))
         }
         assertEquals(listOf("shell:service call autoservice 5"), adbd.opened)
+    }
+
+    @Test fun s202ShellOutputSurvivesEitherAckOrderAndFragmentedBoundary() {
+        for (ackFirst in listOf(true, false)) {
+            VendorAdbd(ackFirst = ackFirst).use { adbd ->
+                LocalAdb(key, port = adbd.port, shellPreamble = "adb36987\n".toByteArray()).use { adb ->
+                    assertEquals("uid=2000(shell) 歌词", adb.shell("id"))
+                }
+            }
+        }
+    }
+
+    @Test fun s202InteractiveValidationPreservesOutputAndConsumesItsAck() {
+        for (ackFirst in listOf(true, false)) {
+            VendorAdbd(ackFirst = ackFirst, interactive = true).use { adbd ->
+                LocalAdb(key, port = adbd.port, shellPreamble = "adb36987\n".toByteArray()).use { adb ->
+                    val shell = adb.openShell("helper")
+                    assertNotNull(shell)
+                    shell!!.use {
+                        assertEquals("greeting\nready", it.exchangeBounded("ping"))
+                        assertEquals("ready", it.exchangeBounded("ping"))
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun s202ValidationFailureDoesNotReturnPromptAsCommandOutput() {
+        for (interactive in listOf(true, false)) {
+            VendorAdbd(ackFirst = true, interactive = interactive, validated = false).use { adbd ->
+                LocalAdb(key, port = adbd.port, shellPreamble = "adb36987\n".toByteArray()).use { adb ->
+                    if (interactive) assertNull(adb.openShell("helper")) else assertNull(adb.shell("id"))
+                }
+            }
+        }
+    }
+
+    /** Prompts and command output may occur on either side of the stdin acknowledgement. */
+    private class VendorAdbd(
+        ackFirst: Boolean,
+        interactive: Boolean = false,
+        validated: Boolean = true,
+    ) : java.io.Closeable {
+        private val server = ServerSocket(0)
+        val port = server.localPort
+        private val failure = AtomicReference<Throwable>()
+        private val worker = thread(isDaemon = true) {
+            runCatching {
+                server.accept().use { socket ->
+                    socket.soTimeout = 2_000
+                    val input = socket.getInputStream()
+                    val output = socket.getOutputStream()
+                    fun send(packet: AdbPacket) = output.write(packet.encode())
+                    assertEquals(AdbPacket.CNXN, AdbPacket.read(input).command)
+                    send(AdbPacket(AdbPacket.CNXN, AdbPacket.VERSION, AdbPacket.MAX_PAYLOAD,
+                        "device::\u0000".toByteArray()))
+                    val open = AdbPacket.read(input)
+                    assertEquals(AdbPacket.OPEN, open.command)
+                    val token = Regex("'(DIPLAY_SHELL_[^']+)'").find(String(open.payload))!!.groupValues[1]
+                    val local = open.arg0
+                    fun ack() = send(AdbPacket(AdbPacket.OKAY, 77, local, ByteArray(0)))
+                    fun data(payload: ByteArray) {
+                        send(AdbPacket(AdbPacket.WRTE, 77, local, payload))
+                        assertEquals(AdbPacket.OKAY, AdbPacket.read(input).command)
+                    }
+                    ack()
+                    val preamble = AdbPacket.read(input)
+                    assertEquals(AdbPacket.WRTE, preamble.command)
+                    assertEquals("adb36987\n", String(preamble.payload))
+                    if (ackFirst) ack()
+                    data("vendor validation prompt\n".toByteArray())
+                    if (validated) {
+                        val result = if (interactive) "greeting\n" else "uid=2000(shell) 歌词"
+                        val bytes = ("\u001e$token\u001f" + result).toByteArray()
+                        data(bytes.copyOfRange(0, 5))
+                        if (interactive) {
+                            data(bytes.copyOfRange(5, bytes.size))
+                        } else {
+                            val cut = bytes.size - 4
+                            data(bytes.copyOfRange(5, cut))
+                            data(bytes.copyOfRange(cut, bytes.size))
+                        }
+                    }
+                    if (!ackFirst) ack()
+                    if (interactive && validated) {
+                        repeat(2) {
+                            val request = AdbPacket.read(input)
+                            assertEquals(AdbPacket.WRTE, request.command)
+                            assertEquals("ping\n", String(request.payload))
+                            data("ready\ndone\n".toByteArray())
+                            ack()
+                        }
+                        assertEquals(AdbPacket.CLSE, AdbPacket.read(input).command)
+                    } else {
+                        send(AdbPacket(AdbPacket.CLSE, 77, local, ByteArray(0)))
+                        if (!interactive) assertEquals(AdbPacket.CLSE, AdbPacket.read(input).command)
+                    }
+                }
+            }.onFailure(failure::set)
+        }
+
+        override fun close() {
+            worker.join(3_000)
+            server.close()
+            assertFalse("Fake adbd did not finish", worker.isAlive)
+            failure.get()?.let { throw AssertionError("Fake adbd failed", it) }
+        }
+    }
+
+    @Test
+    fun shellPreambleIsRestrictedToTheReferenceS202() {
+        assertEquals(
+            "adb36987\n",
+            String(LocalAdbShellPolicy.preamble("spm8666p1_64_car", "mt8666")!!, Charsets.UTF_8),
+        )
+        assertNull(LocalAdbShellPolicy.preamble("spm8666p1_64_car", "other"))
+        assertNull(LocalAdbShellPolicy.preamble("other", "mt8666"))
     }
 
     @Test

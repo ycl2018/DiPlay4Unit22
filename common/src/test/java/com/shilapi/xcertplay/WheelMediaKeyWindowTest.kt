@@ -40,6 +40,7 @@ class WheelMediaKeyWindowTest {
         BydCarPlayCall.end()
         CarPlayBackgroundSession.clear()
         host = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
+        KeyEventDiagnostics.clear(host)
         host.getSharedPreferences("diplay_wheel_map_zoom", Context.MODE_PRIVATE).edit().clear().commit()
         host.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE).edit().clear().commit()
         host.getSystemService(AudioManager::class.java).mode = AudioManager.MODE_NORMAL
@@ -51,6 +52,7 @@ class WheelMediaKeyWindowTest {
     }
 
     @After fun tearDown() {
+        KeyEventDiagnostics.clear(host)
         for (name in listOf("teardownExecutor", "airPlayCommandExecutor")) {
             (host.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(host) as ExecutorService).shutdownNow()
         }
@@ -59,6 +61,27 @@ class WheelMediaKeyWindowTest {
         BydCarPlayCall.end()
         CarPlayBackgroundSession.clear()
         host.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    @Test fun trackKeyPressRepeatAndReleaseAreRetainedInDiagnostics() {
+        for (code in listOf(KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
+            assertTrue(host.dispatchKeyEvent(key(code, true)))
+            assertTrue(host.dispatchKeyEvent(key(code, true, repeat = 1)))
+            assertTrue(host.dispatchKeyEvent(key(code, false)))
+        }
+
+        val lines = KeyEventDiagnostics.report(host).lines()
+        assertEquals(6, lines.size)
+        for (code in listOf(KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
+            val events = lines.filter { it.contains("keyCode=$code(") }
+            assertEquals(3, events.size)
+            assertTrue(events[0].contains("action=DOWN"))
+            assertTrue(events[1].contains("repeat=1"))
+            assertTrue(events[2].contains("action=UP"))
+            val press = CarPlayMediaButton.forKeyCode(code)
+            assertTrue(events.all { it.contains("consumed=true handler=window-media-$press") })
+        }
+        verify(controller, times(2)).sendMediaButton(anyInt())
     }
 
     @Test fun theWheelTrackKeysReachCarPlay() {

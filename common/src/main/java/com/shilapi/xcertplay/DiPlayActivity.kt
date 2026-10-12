@@ -3881,7 +3881,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return super.dispatchKeyEvent(event)
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
+            val consumed = super.dispatchKeyEvent(event)
+            KeyEventDiagnostics.record(this, "settings", event, consumed, "unsupported-action")
+            return consumed
+        }
         val action = windowLearningPresses.filter(
             Triple(event.deviceId, event.keyCode, event.scanCode),
             event.action == KeyEvent.ACTION_DOWN, event.repeatCount == 0,
@@ -3906,7 +3910,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             }
             WheelZoomKeys.Action.CONSUME
         }
-        return action != WheelZoomKeys.Action.PASS || super.dispatchKeyEvent(event)
+        val learningConsumed = action != WheelZoomKeys.Action.PASS
+        val consumed = learningConsumed || super.dispatchKeyEvent(event)
+        KeyEventDiagnostics.record(this, "settings", event, consumed,
+            if (learningConsumed) "key-learning" else "system")
+        return consumed
     }
 
     /** The 0.2.9 Dashboard song setting, shown once: in the BYD navigation card, or under Advanced vehicle data. */
@@ -5331,6 +5339,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     appendLine()
                     appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
                     appendLine(DisplayDiagnosticSnapshot.report(appContext))
+                    appendLine()
+                    appendLine("--- Recent physical key events (oldest to newest) ---")
+                    KeyEventDiagnostics.report(appContext).lineSequence().forEach { line ->
+                        DiagnosticRedactor.redact(line)?.let { appendLine(it) }
+                    }
                     appendLine()
                     appendLine("--- Last received boot and app-launch result ---")
                     appendLine(StartupDiagnosticSnapshot.report(appContext))

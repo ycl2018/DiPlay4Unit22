@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.adb
 
+import com.shilapi.xcertplay.network.ChanganS202HeadUnit
 import java.io.BufferedInputStream
 import java.io.Closeable
 import java.io.IOException
@@ -25,6 +26,7 @@ class LocalAdb(
     private val key: KeyPair,
     private val host: String = "127.0.0.1",
     private val port: Int = 5555,
+    private val shellPreamble: ByteArray? = LocalAdbShellPolicy.currentPreamble(),
 ) : Closeable {
     enum class Access { READY, NOT_APPROVED, UNREACHABLE, UNSUPPORTED }
 
@@ -72,16 +74,25 @@ class LocalAdb(
             require(readTimeoutMillis in 1..MAX_COMMAND_TIMEOUT_MS)
             socket?.soTimeout = readTimeoutMillis
             val local = nextStreamId++
-            send(AdbPacket(AdbPacket.OPEN, local, 0, "shell:$command\u0000".toByteArray()))
+            val boundary = shellPreamble?.let { VendorShellOutput() }
+            val remoteCommand = boundary?.wrap(command) ?: command
+            send(AdbPacket(AdbPacket.OPEN, local, 0, "shell:$remoteCommand\u0000".toByteArray()))
             var remote = 0
             var finished = false
-            val text = StringBuilder()
+            var preambleSent = false
+            val text = java.io.ByteArrayOutputStream()
             while (!finished) {
                 val packet = receive()
                 when {
-                    packet.command == AdbPacket.OKAY && packet.arg1 == local -> remote = packet.arg0
+                    packet.command == AdbPacket.OKAY && packet.arg1 == local -> {
+                        remote = packet.arg0
+                        if (shellPreamble != null && !preambleSent) {
+                            send(AdbPacket(AdbPacket.WRTE, local, remote, shellPreamble.copyOf()))
+                            preambleSent = true
+                        }
+                    }
                     packet.command == AdbPacket.WRTE && packet.arg1 == local -> {
-                        text.append(String(packet.payload, Charsets.UTF_8))
+                        text.write(boundary?.accept(packet.payload) ?: packet.payload)
                         send(AdbPacket(AdbPacket.OKAY, local, packet.arg0, ByteArray(0)))
                     }
                     packet.command == AdbPacket.CLSE && packet.arg1 == local -> {
@@ -93,7 +104,8 @@ class LocalAdb(
                         send(AdbPacket(AdbPacket.CLSE, packet.arg1, packet.arg0, ByteArray(0)))
                 }
             }
-            text.toString().trim().also { socket?.soTimeout = READ_TIMEOUT_MS }
+            if (boundary != null && !boundary.started) throw IOException("shell validation did not complete")
+            text.toString("UTF-8").trim().also { socket?.soTimeout = READ_TIMEOUT_MS }
         } catch (_: IOException) {
             closeQuietly()
             null
@@ -107,11 +119,14 @@ class LocalAdb(
         if (socket?.isClosed != false && connect(mayAsk = false) != Access.READY) return null
         return try {
             val local = nextStreamId++
-            send(AdbPacket(AdbPacket.OPEN, local, 0, "shell:$command\u0000".toByteArray()))
+            val boundary = shellPreamble?.let { VendorShellOutput() }
+            val remoteCommand = boundary?.wrap(command) ?: command
+            send(AdbPacket(AdbPacket.OPEN, local, 0, "shell:$remoteCommand\u0000".toByteArray()))
             val reply = receive()
             if (reply.command != AdbPacket.OKAY || reply.arg1 != local) throw IOException("interactive open rejected")
+            val initialOutput = boundary?.let { sendShellPreamble(local, reply.arg0, it) } ?: ByteArray(0)
             InteractiveShell(local, reply.arg0, ::send, ::receive,
-                { timeout -> socket?.soTimeout = timeout }, ::closeQuietly)
+                { timeout -> socket?.soTimeout = timeout }, ::closeQuietly, initialOutput)
         } catch (_: IOException) {
             closeQuietly()
             null
@@ -126,6 +141,7 @@ class LocalAdb(
         private val readPacket: () -> AdbPacket,
         private val setTimeout: (Int) -> Unit,
         private val closeConnection: () -> Unit,
+        private var initialOutput: ByteArray = ByteArray(0),
     ) : Closeable {
         @Volatile private var closed = false
         private companion object {
@@ -147,6 +163,8 @@ class LocalAdb(
                 sendPacket(AdbPacket(AdbPacket.WRTE, local, remote, "$request\n".toByteArray(Charsets.UTF_8)))
                 var acknowledged = false
                 val response = InteractiveResponseBuffer()
+                response.accept(initialOutput)
+                initialOutput = ByteArray(0)
                 var packets = 0
                 while (!acknowledged || !response.complete) {
                     if (++packets > 64) throw IOException("interactive packet limit")
@@ -240,6 +258,35 @@ class LocalAdb(
 
     private fun receive(): AdbPacket = AdbPacket.read(input ?: throw IOException("not connected"))
 
+    /** Prime a vendor shell before returning it to a caller that will exchange its own protocol. */
+    private fun sendShellPreamble(local: Int, remote: Int, boundary: VendorShellOutput): ByteArray {
+        val preamble = shellPreamble ?: return ByteArray(0)
+        send(AdbPacket(AdbPacket.WRTE, local, remote, preamble.copyOf()))
+        val output = java.io.ByteArrayOutputStream()
+        val deadline = System.nanoTime() + READ_TIMEOUT_MS * 1_000_000L
+        var acknowledged = false
+        var packets = 0
+        while (!acknowledged || !boundary.started) {
+            if (++packets > 64) throw IOException("shell validation packet limit")
+            val remaining = (deadline - System.nanoTime()) / 1_000_000L
+            if (remaining <= 0) throw SocketTimeoutException("shell validation deadline")
+            socket?.soTimeout = remaining.toInt().coerceAtLeast(1)
+            val packet = receive()
+            if (packet.arg0 != remote || packet.arg1 != local) throw IOException("wrong preamble stream")
+            when (packet.command) {
+                AdbPacket.OKAY -> acknowledged = true
+                AdbPacket.WRTE -> {
+                    output.write(boundary.accept(packet.payload))
+                    send(AdbPacket(AdbPacket.OKAY, local, remote, ByteArray(0)))
+                }
+                AdbPacket.CLSE -> throw IOException("shell validation rejected")
+                else -> throw IOException("unexpected shell validation packet")
+            }
+        }
+        socket?.soTimeout = READ_TIMEOUT_MS
+        return output.toByteArray()
+    }
+
     private fun closeQuietly() {
         runCatching { socket?.close() }
         socket = null
@@ -255,6 +302,40 @@ class LocalAdb(
         const val APPROVAL_RECHECK_MS = 1_000
         const val MAX_COMMAND_TIMEOUT_MS = 30_000
     }
+}
+
+/** The shell emits a unique boundary after vendor validation, independently of ADB flow-control ACKs. */
+internal class VendorShellOutput {
+    private val token = "DIPLAY_SHELL_${java.util.UUID.randomUUID()}"
+    private val marker = "\u001e$token\u001f".toByteArray(Charsets.UTF_8)
+    private var matched = 0
+    var started = false
+        private set
+
+    fun wrap(command: String): String = "printf '\\036%s\\037' '$token'; {\n$command\n}"
+
+    fun accept(payload: ByteArray): ByteArray {
+        if (started) return payload
+        payload.forEachIndexed { index, byte ->
+            // The marker's first byte cannot occur anywhere else in the marker.
+            matched = if (byte == marker[matched]) matched + 1 else if (byte == marker[0]) 1 else 0
+            if (matched == marker.size) {
+                started = true
+                return payload.copyOfRange(index + 1, payload.size)
+            }
+        }
+        return ByteArray(0)
+    }
+}
+
+/** The Changan S202 vendor adbd validates the first stdin line of every shell command. */
+internal object LocalAdbShellPolicy {
+    fun currentPreamble(): ByteArray? = runCatching {
+        if (ChanganS202HeadUnit.detected) "adb36987\n".toByteArray(Charsets.UTF_8) else null
+    }.getOrNull()
+
+    internal fun preamble(board: String?, hardware: String?): ByteArray? =
+        if (ChanganS202HeadUnit.matches(board, hardware)) "adb36987\n".toByteArray(Charsets.UTF_8) else null
 }
 
 /** ADB payload boundaries need not coincide with UTF-8 characters or response lines. */

@@ -165,6 +165,16 @@ Recipients can extract that identity from the APK.
 The APK excludes the Android signing key.
 See [the project notices](THIRD_PARTY_NOTICES.md) for the experimental identity used in public releases.
 
+To produce a release-variant APK for an external signing process, explicitly request an unsigned
+build. This keeps the release application ID but cannot update or install until it is signed:
+
+```sh
+DIPLAY_UNSIGNED_RELEASE=true ./gradlew :mobile:assembleRelease
+```
+
+Runtime authentication assets remain a separate explicit input. Omit `DIPLAY_AUTH_ASSETS_DIR` for
+a source-only APK, or set it to the intended external runtime-assets directory before building.
+
 The public source archive matches the release tag.
 It excludes runtime identities, signing keys, local configuration, and build output.
 The retired `build-beta.py` helper is no longer part of the build procedure.

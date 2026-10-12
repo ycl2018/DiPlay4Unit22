@@ -6,6 +6,8 @@ plugins {
 // Optional local-only input. CI and ordinary source builds contain no accessory identity.
 val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
     .orNull?.let { file(it).canonicalFile }
+val unsignedRelease = providers.environmentVariable("DIPLAY_UNSIGNED_RELEASE")
+    .orNull.equals("true", ignoreCase = true)
 
 android {
     namespace = "com.shilapi.xcertplay"
@@ -17,7 +19,7 @@ android {
         applicationId = "com.shihab.diplay"
         minSdk = 25
         targetSdk = 37
-        versionCode = 37
+        versionCode = 40
         versionName = "0.2.18"
 
     }
@@ -46,7 +48,7 @@ android {
             optimization {
                 enable = false
             }
-            signingConfig = signingConfigs.getByName("release")
+            if (!unsignedRelease) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
