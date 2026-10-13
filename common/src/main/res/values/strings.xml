@@ -704,6 +704,10 @@
     <string name="wheel_key_in_use">That key is already the %1$s key. Choose another key.</string>
     <string name="wheel_siri_key">Siri key on the wheel</string>
     <string name="wheel_siri_key_description">Opens Siri with a wheel key you choose while CarPlay is on the screen. A key that the car keeps for itself works only with the wheel key service, which also works when CarPlay is in the background. Without CarPlay, or during a call, the key keeps the car\'s own action.</string>
+    <string name="wheel_siri_double_press">Double press for Siri</string>
+    <string name="wheel_siri_double_press_description">A single press keeps the car\'s action. Press twice within the selected interval; DiPlay opens Siri after the selected delay. The wheel key service is required if the car\'s assistant takes over the screen. Applies immediately.</string>
+    <string name="wheel_siri_double_press_interval">Double-press interval</string>
+    <string name="wheel_siri_trigger_delay">Siri trigger delay</string>
     <string name="wheel_key_role_back">back</string>
     <string name="wheel_key_service_label">DiPlay wheel keys</string>
     <string name="wheel_key_service_description">Optional wheel key filtering for navigation volume during spoken guidance, dashboard map zoom, CarPlay joystick and call controls. No screen content is read.</string>

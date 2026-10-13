@@ -702,6 +702,10 @@
     <string name="wheel_key_in_use">そのキーはすでに%1$sに割り当てられています。別のキーを選択してください。</string>
     <string name="wheel_siri_key">ステアリングのSiriキー</string>
     <string name="wheel_siri_key_description">CarPlayを表示している間、選択したステアリングスイッチでSiriを起動します。車が独自に使用するキーはステアリングスイッチサービスが必要ですが、このサービスはCarPlayがバックグラウンドでも動作します。CarPlayが停止中、または通話中は、そのキーに割り当てられた車両本来の操作を維持します。</string>
+    <string name="wheel_siri_double_press">ダブルクリックでSiriを起動</string>
+    <string name="wheel_siri_double_press_description">1回押した場合は車両本来の操作を維持します。設定した間隔内に2回押すと、設定した遅延後にDiPlayがSiriを起動します。車両のアシスタントが画面を占有する場合は、ステアリングスイッチサービスが必要です。すぐに反映されます。</string>
+    <string name="wheel_siri_double_press_interval">ダブルクリック間隔</string>
+    <string name="wheel_siri_trigger_delay">Siri起動遅延</string>
     <string name="wheel_key_role_back">戻る</string>
     <string name="wheel_key_service_label">DiPlayステアリングスイッチ</string>
     <string name="wheel_key_service_description">案内時の音量調整、メーター地図の拡大・縮小、CarPlayジョイスティック、通話操作のためのオプションサービスです。</string>

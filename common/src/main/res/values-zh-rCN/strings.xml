@@ -667,6 +667,10 @@
     <string name="wheel_key_in_use">该按键已用于%1$s。请选择其他按键。</string>
     <string name="wheel_siri_key">方向盘 Siri 按键</string>
     <string name="wheel_siri_key_description">在 CarPlay 显示于屏幕时，用你选择的方向盘按键打开 Siri。车辆自身保留的按键只能配合方向盘按键服务使用，该服务在 CarPlay 处于后台时也可使用。未连接 CarPlay 或通话时，该按键保留车辆原有功能。</string>
+    <string name="wheel_siri_double_press">双击触发 Siri</string>
+    <string name="wheel_siri_double_press_description">单击保留车辆原有功能。在设定间隔内按两次，DiPlay 会在设定延时后打开 Siri。如果原车助手会接管屏幕，则必须启用方向盘按键服务。立即生效。</string>
+    <string name="wheel_siri_double_press_interval">双击间隔</string>
+    <string name="wheel_siri_trigger_delay">Siri 触发延时</string>
     <string name="wheel_key_role_back">返回</string>
     <string name="wheel_key_service_label">DiPlay 方向盘按键</string>
     <string name="wheel_key_service_description">可选方向盘按键过滤，用于导航播报音量、仪表地图缩放、CarPlay摇杆及通话控制。不读取屏幕内容。</string>

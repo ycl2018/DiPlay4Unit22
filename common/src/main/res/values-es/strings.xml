@@ -623,6 +623,10 @@
     <string name="wheel_key_in_use">Ese botón ya es el botón de %1$s. Elige otro botón.</string>
     <string name="wheel_siri_key">Botón de Siri en el volante</string>
     <string name="wheel_siri_key_description">Abre Siri con un botón del volante que elijas mientras CarPlay está en pantalla. Un botón que el coche reserva para sí mismo solo funciona con el servicio de botones del volante, que también funciona con CarPlay en segundo plano. Sin CarPlay, o durante una llamada, el botón conserva su función en el coche.</string>
+    <string name="wheel_siri_double_press">Doble pulsación para Siri</string>
+    <string name="wheel_siri_double_press_description">Una sola pulsación conserva la función del coche. Pulsa dos veces dentro del intervalo elegido; DiPlay abre Siri tras el retardo seleccionado. Se requiere el servicio de botones del volante si el asistente del coche ocupa la pantalla. Se aplica inmediatamente.</string>
+    <string name="wheel_siri_double_press_interval">Intervalo de doble pulsación</string>
+    <string name="wheel_siri_trigger_delay">Retardo para iniciar Siri</string>
     <string name="wheel_key_role_back">atrás</string>
     <string name="wheel_key_service_label">Botones del volante de DiPlay</string>
     <string name="wheel_key_service_description">Filtrado opcional de las teclas del volante para el volumen de las indicaciones de navegación, el zoom del mapa del panel, el joystick de CarPlay y los controles de llamada. No se lee el contenido de la pantalla.</string>

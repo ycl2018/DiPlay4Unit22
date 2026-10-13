@@ -2,6 +2,10 @@
 
 Changes through DiPlay 0.2.19 are documented in [0.2.19 release notes](RELEASE-NOTES-0.2.19.md). Measured checks are in [VALIDATION.md](VALIDATION.md). Device acceptance and remaining failure families are tracked in [connection reliability validation](CONNECTION_RELIABILITY.md).
 
+## Vehicle
+
+- The custom steering-wheel Siri key can optionally require a double press; the option is off by default. A single press remains available to the car, while the second release opens Siri after a configurable delay. The double-press interval and Siri delay are adjustable. The wheel-key service continues detecting the pair if the car assistant takes the foreground; the CarPlay window remains a fallback on cars whose assistant does not take focus.
+
 ## Changan S202 adaptations
 
 - Route Siri capture through `VOICE_COMMUNICATION` on the reference S202. Its `VOICE_RECOGNITION` path returned about four seconds of PCM and 200 nominal 20 ms packets per wall-clock second, while two real CarPlay calls on `VOICE_COMMUNICATION` stayed at the requested rate and 50 packets/s. Siri keeps its assistant routing and does not enter call mode or enable call-only audio effects.
