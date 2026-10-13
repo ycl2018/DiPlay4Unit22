@@ -56,7 +56,7 @@ class WheelKeyService : AccessibilityService() {
         if (running !== this || pending == null || session() !== pending.session ||
             !WheelZoomSettings.siriDoublePress(this) ||
             !WheelZoomSettings.isSiriKey(this, pending.assignedKey) || inCall(this)) return@Runnable
-        Log.i(TAG, "Siri double key sent=${requestSiri()} intervalMs=${pending.intervalMillis} " +
+        note("Siri double key sent=${requestSiri()} intervalMs=${pending.intervalMillis} " +
             "delayMs=${pending.triggerDelayMillis}")
     }
     private var learning: WheelZoomSettings.Role? = null
@@ -114,13 +114,15 @@ class WheelKeyService : AccessibilityService() {
         refreshEligibility()
         handler.removeCallbacks(pollEligibility)
         handler.postDelayed(pollEligibility, ELIGIBILITY_POLL_MILLIS)
-        Log.i(TAG, "wheel key service connected")
+        WheelKeyLog.bound()
+        note("wheel key service connected")
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         if (running === this) {
             running = null
             lastObservedKeyEvent = null
+            note("wheel key service unbound")
         }
         clearLearning()
         keys.updateEligibility(null)
@@ -140,6 +142,7 @@ class WheelKeyService : AccessibilityService() {
         if (running === this) {
             running = null
             lastObservedKeyEvent = null
+            note("wheel key service destroyed")
         }
         clearLearning()
         keys.timeOut()
@@ -154,6 +157,29 @@ class WheelKeyService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         lastObservedKeyEvent = WheelKeyEventFingerprint.of(event)
+        val kept = handleKey(event)
+        // A held key repeats many times a second; its first press is the evidence.
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) recordPress(event, kept)
+        return kept
+    }
+
+    /** One entry per press for the diagnostic report; it must never be in the way of the key itself. */
+    private fun recordPress(event: KeyEvent, kept: Boolean) {
+        runCatching {
+            val text = WheelKeyLog.writesText(event.keyCode) || runCatching { event.isPrintingKey }.getOrDefault(true)
+            val detail = when {
+                text -> null
+                navigationKeys.owns(event.keyCode, event.deviceId, event.downTime) -> "navigation volume"
+                !kept && NavigationWheelKeyPolicy.volumeStep(event.keyCode) != null -> navigationGate().let {
+                    "navigation volume not used: ${it.closedBy ?: "stream ${it.stream} did not take the change"}"
+                }
+                else -> null
+            }
+            WheelKeyLog.press(event.keyCode, event.scanCode, event.deviceId, kept, detail, text)
+        }
+    }
+
+    private fun handleKey(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
             return finishKeyEvent(event, false, "unsupported-action")
         }
@@ -179,7 +205,7 @@ class WheelKeyService : AccessibilityService() {
         if (BydOutputSettings.carPlayCallControls(this) &&
             CarPlayMediaButton.opensSiriWhileCarPlay(event.keyCode) &&
             !WheelZoomSettings.isSiriKey(this, key) && session() != null) {
-            if (!down) Log.i(TAG, "CarPlay voice key ${event.keyCode}: Siri sent=${CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true}")
+            if (!down) note("CarPlay voice key ${event.keyCode}: Siri sent=${CarPlayBackgroundSession.snapshot()?.controller?.requestSiri() == true}")
             return finishKeyEvent(event, true, "carplay-voice")
         }
         refreshEligibility()
@@ -265,11 +291,11 @@ class WheelKeyService : AccessibilityService() {
                     clearLearning(notify = false)
                     val taken = WheelZoomSettings.conflict(this, role, key)
                     if (taken != null) {
-                        Log.i(TAG, "$role key $key refused: it is the $taken key")
+                        note("$role key $key refused: it is the $taken key")
                         refused?.invoke(taken)
                     } else {
                         WheelZoomSettings.assign(this, role, key)
-                        Log.i(TAG, "$role key is now $key")
+                        note("$role key is now $key")
                         done?.invoke(role, key)
                     }
                     WheelZoomKeys.Action.CONSUME
@@ -292,7 +318,7 @@ class WheelKeyService : AccessibilityService() {
     }
 
     private fun finishKeyEvent(event: KeyEvent, consumed: Boolean, handler: String): Boolean {
-        keyEventLogger(this, "accessibility", event, consumed, handler)
+        runCatching { keyEventLogger(this, "accessibility", event, consumed, handler) }
         return consumed
     }
 
@@ -301,12 +327,23 @@ class WheelKeyService : AccessibilityService() {
         eligible = navigationStream() != null,
     ) { delta -> adjustNavigation(delta) }
 
-    private fun navigationStream(): Int? {
-        if (!NavigationWheelSettings.enabled(this) || running !== this || inCall(this) || session() == null) return null
+    private fun navigationStream(): Int? = navigationGate().stream
+
+    private class NavigationGate(val closedBy: String?, val stream: Int? = null)
+
+    /** The stream the volume keys may change now, or the first reason they stay with the head unit. */
+    private fun navigationGate(): NavigationGate {
+        if (!NavigationWheelSettings.enabled(this)) return NavigationGate("its setting is off")
+        if (running !== this) return NavigationGate("the service is not bound")
+        if (inCall(this)) return NavigationGate("a call is active")
+        if (session() == null) return NavigationGate("no CarPlay session")
         val playback = navigationPlayback()
-        if (!playback.active || playback.priorityVoiceActive) return null
+        if (!playback.active) return NavigationGate("no guidance is speaking")
+        if (playback.priorityVoiceActive) return NavigationGate("Siri or a call is speaking")
         // Usage routing and a rejected legacy route cannot identify a safe volume stream.
-        return playback.legacyStreamType?.takeIf { it in 1..20 && it != AudioManager.STREAM_MUSIC }
+        val stream = playback.legacyStreamType?.takeIf { it in 1..20 && it != AudioManager.STREAM_MUSIC }
+            ?: return NavigationGate("navigation audio stream ${playback.legacyStreamType ?: "automatic"} has no volume of its own")
+        return NavigationGate(null, stream)
     }
 
     private fun adjustNavigation(delta: Int): Boolean {
@@ -325,6 +362,7 @@ class WheelKeyService : AccessibilityService() {
             audio.getStreamVolume(stream) == target
         } catch (error: Exception) {
             Log.w(TAG, "navigation volume unavailable for stream $stream", error)
+            WheelKeyLog.note("navigation volume unavailable for stream $stream: ${error.javaClass.simpleName}")
             false
         }
     }
@@ -342,7 +380,7 @@ class WheelKeyService : AccessibilityService() {
     // Without a CarPlay session, or in a call, the key keeps the car's own action.
     private fun siriPress(role: WheelZoomSettings.Role?, calling: Boolean, eventTime: Long): WheelZoomKeys.Action? {
         if (role != WheelZoomSettings.Role.SIRI || calling || session() == null) return null
-        if (siriKey.opens(eventTime)) Log.i(TAG, "Siri key sent=${requestSiri()}")
+        if (siriKey.opens(eventTime)) note("Siri key sent=${requestSiri()}")
         return WheelZoomKeys.Action.CONSUME
     }
 
@@ -399,7 +437,7 @@ class WheelKeyService : AccessibilityService() {
     // A toast with the keys at a glance on the centre screen; on the dashboard only the state (its font
     // is limited).
     private fun announceJoystick(on: Boolean) {
-        Log.i(TAG, "joystick ${if (on) "on" else "off"}")
+        note("joystick ${if (on) "on" else "off"}")
         val text = getString(if (on) R.string.wheel_joystick_on else R.string.wheel_joystick_off)
         handler.post {
             if (on) Toast.makeText(this, "$text\n${getString(R.string.wheel_joystick_hint)}", Toast.LENGTH_LONG).show()
@@ -442,7 +480,7 @@ class WheelKeyService : AccessibilityService() {
     // On the centre screen, and where the song shows on the dashboard: zoom with BYD's Bluetooth-music
     // icon (source 6), volume with the song's usual icon.
     private fun announce(zoomOn: Boolean) {
-        Log.i(TAG, "zoom mode ${if (zoomOn) "on" else "off"}")
+        note("zoom mode ${if (zoomOn) "on" else "off"}")
         handler.post {
             Toast.makeText(this, if (zoomOn) R.string.wheel_zoom_mode_on else R.string.wheel_zoom_mode_off, Toast.LENGTH_SHORT).show()
         }
@@ -511,7 +549,7 @@ class WheelKeyService : AccessibilityService() {
                 mayAsk || wanted(context)
             }
             if (allowed && mayAsk) NavigationWheelSettings.recordAuthorization(context)
-            if (allowed) Log.i(TAG, "wheel key service allowed over adb")
+            if (allowed) note("wheel key service allowed over adb")
             if (allowed) access else LocalAdb.Access.UNREACHABLE
         }
 
@@ -590,10 +628,13 @@ class WheelKeyService : AccessibilityService() {
                         sleep = Thread::sleep,
                     ) { attempt, access ->
                         Log.i(TAG, "wheel key service restore attempt=$attempt adb=$access bound=${connected()}")
+                        // Without its number, a run of attempts that end the same way is one line of the report.
+                        WheelKeyLog.note("wheel key service restore attempt adb=$access bound=${connected()}")
                         recordRestore(app, attempt, access)
                     }
                 } catch (error: Exception) {
                     Log.w(TAG, "wheel key service restore failed", error)
+                    WheelKeyLog.note("wheel key service restore failed: ${error.javaClass.simpleName}")
                 } finally {
                     restoring.set(false)
                 }
@@ -664,6 +705,12 @@ class WheelKeyService : AccessibilityService() {
     private fun onMain(action: WheelKeyService.() -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else handler.post { action() }
     }
+}
+
+/** Logcat and the diagnostic report: a head unit without adb has only the report. */
+private fun note(message: String) {
+    Log.i(WheelKeyService.TAG, message)
+    WheelKeyLog.note(message)
 }
 
 // CarPlay's iAP2 call state can be active even when the head unit leaves Android's mode normal.
