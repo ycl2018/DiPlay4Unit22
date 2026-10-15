@@ -3,7 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Parallel Robolectric forks are opt-in because each fork may use up to 1 GiB.
+// Parallel Robolectric forks are opt-in because each fork may use up to 2 GiB.
 val unitTestForks = providers.environmentVariable("DIPLAY_TEST_FORKS").orNull
     ?.toIntOrNull()?.coerceIn(1, 8) ?: 1
 
@@ -28,9 +28,11 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        // The UI suite covers several SDKs and locale-specific resource sandboxes.
+        // The UI suite covers several SDKs and locale-specific resource sandboxes. 1g sat right at the
+        // ceiling: adding one more Robolectric class pushed a full run into OutOfMemoryError in
+        // unrelated tests, on CI and locally both, which is what BydSettingsDecoyTest measured.
         unitTests.all {
-            it.maxHeapSize = "1g"
+            it.maxHeapSize = "2g"
             it.maxParallelForks = unitTestForks
         }
     }
