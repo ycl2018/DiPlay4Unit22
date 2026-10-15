@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">検索を開始</string>
+    <string name="settings_navigation_channel_search_offer">独立ナビ音量をオンにしました。使用可能なナビチャンネルを今すぐ検索しますか？接続済みのステアリングキーサービスが DiPlay 経由の音量上下をテストします。</string>
+    <string name="settings_navigation_channel_search_title">ナビ音声チャンネルを検索</string>
+    <string name="settings_navigation_channel_search_prompt">チャンネル %1$d でテスト音を繰り返し再生しています。音量上下キーを押し、テスト音の音量が正しく変わることを確認してください。</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">ステアリングキーのユーザー補助サービスが接続されていません。ナビチャンネルを検索する前に有効にしてください。</string>
+    <string name="settings_navigation_channel_search_volume_enabled">独立ナビ音量とステアリングキーサービスはオンです。実際のナビ案内でも DiPlay は同じチャンネルの調整を試みます。</string>
+    <string name="settings_navigation_channel_search_apply">テスト正常・適用</string>
+    <string name="settings_navigation_channel_search_previous">前のチャンネル</string>
+    <string name="settings_navigation_channel_search_next">次のチャンネル</string>
+    <string name="settings_navigation_channel_search_saved_title">ナビ音声チャンネルを保存しました</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">チャンネル %1$d を保存しました。実際のナビ音声で使用するため、CarPlay を今すぐ再接続しますか？</string>
+    <string name="settings_navigation_channel_search_reconnect_now">はい、再接続</string>
+    <string name="settings_navigation_channel_search_reconnect_later">いいえ、後で</string>
+</resources>

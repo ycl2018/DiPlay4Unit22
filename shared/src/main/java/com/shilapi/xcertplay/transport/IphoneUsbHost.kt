@@ -15,6 +15,7 @@ import android.hardware.usb.UsbManager
 import android.hardware.usb.UsbRequest
 import android.os.Build
 import android.util.Log
+import com.shilapi.xcertplay.network.ChanganS202HeadUnit
 import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -73,12 +74,17 @@ class IphoneUsbHost(
     private val appContext = context.applicationContext
 
     sealed class PermissionRequest {
+        enum class AdbReason(val diagnostic: String) {
+            CHANGAN_S202_OVERRIDE("changan-s202-override"),
+            PERMISSION_UI_UNAVAILABLE("permission-ui-unavailable"),
+        }
+
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
         data class Requested(
             val device: UsbDevice,
             val afterMissingUiAdbFailure: Boolean = false,
         ) : PermissionRequest()
-        data class AdbRequired(val device: UsbDevice) : PermissionRequest()
+        data class AdbRequired(val device: UsbDevice, val reason: AdbReason) : PermissionRequest()
     }
 
     sealed class PermissionResult {
@@ -106,13 +112,23 @@ class IphoneUsbHost(
         requireConfiguredDevice(device)
         if (usbManager.hasPermission(device)) return PermissionRequest.AlreadyGranted(device)
 
+        if (allowAdbFallback && ChanganS202HeadUnit.detected && IphoneUsbAdbGrant.supported()) {
+            return PermissionRequest.AdbRequired(
+                device,
+                PermissionRequest.AdbReason.CHANGAN_S202_OVERRIDE,
+            )
+        }
+
         val ui = UsbPermissionActivityProbe.inspect(appContext)
         if (ui.state != UsbPermissionActivityProbe.State.UNKNOWN) {
             runCatching { onDiagnostic(ui.diagnostic()) }
         }
         if (ui.state == UsbPermissionActivityProbe.State.UNAVAILABLE) {
             if (allowAdbFallback && IphoneUsbAdbGrant.supported()) {
-                return PermissionRequest.AdbRequired(device)
+                return PermissionRequest.AdbRequired(
+                    device,
+                    PermissionRequest.AdbReason.PERMISSION_UI_UNAVAILABLE,
+                )
             }
         }
         usbManager.requestPermission(device, permissionPendingIntent())

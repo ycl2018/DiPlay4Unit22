@@ -1880,7 +1880,7 @@ class CarPlayController(
                     pollIphonePermission(device, request.afterMissingUiAdbFailure)
                 }
                 is IphoneUsbHost.PermissionRequest.AdbRequired -> {
-                    debugLog("wired iPhone USB permission route=ADB; system permission UI unavailable")
+                    debugLog("wired iPhone USB permission route=ADB reason=${request.reason.diagnostic}")
                     permissionGrant.set(false)
                     permissionPollGeneration++
                     onStatus(CarPlayStatus.RequestingIphonePermission)
@@ -1912,7 +1912,7 @@ class CarPlayController(
                 .getOrElse { IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.ERROR) }
             connectionDiagnostic(
                 "USB permission ADB grant result=${result.code} attached=${result.attached} " +
-                    "granted=${result.granted}",
+                    "granted=${result.granted} defaults=${result.defaults}",
             )
             mainHandler.post {
                 if (closed || phase != grantPhase || permissionPollGeneration != grantGeneration) return@post

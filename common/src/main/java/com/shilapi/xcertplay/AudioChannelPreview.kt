@@ -13,8 +13,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sin
 
-/** Plays one short tone through the same legacy stream route used by CarPlay audio. */
-internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : Closeable {
+/** Plays a tone through the same usage or legacy-stream route used by CarPlay audio. */
+internal class AudioChannelPreview(
+    private val onUnavailable: (Int) -> Unit,
+    private val onStarted: (Int) -> Unit = {},
+) : Closeable {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "diplay-channel-preview").apply { isDaemon = true }
@@ -24,7 +27,7 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
     private var pending: Future<*>? = null
     @Volatile private var closed = false
 
-    fun play(channel: Int, navigation: Boolean) {
+    fun play(channel: Int, navigation: Boolean, continuous: Boolean = false) {
         if (closed) return
         require(channel in AirPlayPersistence.AUDIO_CHANNELS)
         val request = generation.incrementAndGet()
@@ -70,20 +73,23 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 check(built.state == AudioTrack.STATE_INITIALIZED) { "Audio output did not initialize" }
                 if (closed || generation.get() != request) return@submit
                 activeTrack.set(built)
+                if (closed || generation.get() != request) return@submit
                 built.setVolume(0.6f)
                 built.play()
-                var written = 0
-                while (written < pcm.size && !closed && generation.get() == request) {
-                    val count = built.write(
-                        pcm, written, minOf(4096, pcm.size - written), AudioTrack.WRITE_BLOCKING,
-                    )
-                    check(count > 0) { "Could not write preview tone" }
-                    written += count
-                }
-                if (!closed && generation.get() == request && written == pcm.size) {
-                    Log.i(TAG, "Preview started channel=$channel navigation=$navigation")
-                }
-                Thread.sleep(120L)
+                val silence = ByteArray(SAMPLE_RATE * GAP_MILLIS / 1000 * 2)
+                var announced = false
+                do {
+                    writeFully(built, pcm, request)
+                    if (!announced && !closed && generation.get() == request) {
+                        Log.i(TAG, "Preview started channel=$channel navigation=$navigation continuous=$continuous")
+                        announced = true
+                        mainHandler.post {
+                            if (!closed && generation.get() == request) onStarted(channel)
+                        }
+                    }
+                    if (continuous) writeFully(built, silence, request)
+                } while (continuous && !closed && generation.get() == request)
+                if (!continuous) Thread.sleep(120L)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             } catch (error: Exception) {
@@ -106,6 +112,17 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
         worker.shutdownNow()
     }
 
+    private fun writeFully(track: AudioTrack, data: ByteArray, request: Int) {
+        var written = 0
+        while (written < data.size && !closed && generation.get() == request) {
+            val count = track.write(
+                data, written, minOf(4096, data.size - written), AudioTrack.WRITE_BLOCKING,
+            )
+            check(count > 0) { "Could not write preview tone" }
+            written += count
+        }
+    }
+
     private fun tone(): ByteArray {
         val sampleCount = SAMPLE_RATE * TONE_MILLIS / 1000
         val fadeSamples = SAMPLE_RATE / 100
@@ -125,5 +142,6 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
         private const val TAG = "DiPlayAudioPreview"
         private const val SAMPLE_RATE = 48_000
         private const val TONE_MILLIS = 600
+        private const val GAP_MILLIS = 250
     }
 }

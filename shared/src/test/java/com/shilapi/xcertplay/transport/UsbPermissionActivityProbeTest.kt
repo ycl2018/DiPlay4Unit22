@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.os.Build
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -31,6 +32,8 @@ class UsbPermissionActivityProbeTest {
     private val component = ComponentName.unflattenFromString(UsbPermissionActivityProbe.COMPONENT)!!
 
     @Before fun reset() {
+        ReflectionHelpers.setStaticField(Build::class.java, "BOARD", "other")
+        ReflectionHelpers.setStaticField(Build::class.java, "HARDWARE", "other")
         shadowOf(context.packageManager).removeActivity(component)
         PermissionRequestUsbManagerShadow.requests = 0
     }
@@ -76,11 +79,38 @@ class UsbPermissionActivityProbeTest {
         val diagnostics = mutableListOf<String>()
         for (name in listOf("initial", "reenumerated")) {
             val host = IphoneUsbHost(context, usb, IphoneUsbMatcher.appleVendor(), onDiagnostic = diagnostics::add)
-            assertTrue(host.requestPermission(device(name)) is IphoneUsbHost.PermissionRequest.AdbRequired)
+            val request = host.requestPermission(device(name))
+            assertTrue(request is IphoneUsbHost.PermissionRequest.AdbRequired)
+            assertEquals(
+                IphoneUsbHost.PermissionRequest.AdbReason.PERMISSION_UI_UNAVAILABLE,
+                (request as IphoneUsbHost.PermissionRequest.AdbRequired).reason,
+            )
+            assertEquals("permission-ui-unavailable", request.reason.diagnostic)
         }
         assertEquals(0, PermissionRequestUsbManagerShadow.requests)
         assertTrue(diagnostics.all { it.contains("state=UNAVAILABLE") })
         assertTrue(diagnostics.none { it.contains("cached=") })
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun s202UsesAdbBeforeTheSystemPermissionFlow() {
+        ReflectionHelpers.setStaticField(Build::class.java, "BOARD", "spm8666p1_64_car")
+        ReflectionHelpers.setStaticField(Build::class.java, "HARDWARE", "mt8666")
+        installPermissionActivity()
+        val usb = context.getSystemService(UsbManager::class.java)
+        val diagnostics = mutableListOf<String>()
+        val host = IphoneUsbHost(context, usb, IphoneUsbMatcher.appleVendor(), onDiagnostic = diagnostics::add)
+
+        val request = host.requestPermission(device("initial"))
+        assertTrue(request is IphoneUsbHost.PermissionRequest.AdbRequired)
+        assertEquals(
+            IphoneUsbHost.PermissionRequest.AdbReason.CHANGAN_S202_OVERRIDE,
+            (request as IphoneUsbHost.PermissionRequest.AdbRequired).reason,
+        )
+        assertEquals("changan-s202-override", request.reason.diagnostic)
+        assertEquals(0, PermissionRequestUsbManagerShadow.requests)
+        assertTrue(diagnostics.isEmpty())
     }
 
     @Test fun failedAdbWithMissingUiFallsBackToTheSystemRequest() {

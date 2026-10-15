@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">Start channel search</string>
+    <string name="settings_navigation_channel_search_offer">Independent navigation volume is on. Search for a working navigation stream now? The connected wheel-key service will test volume up and down through DiPlay.</string>
+    <string name="settings_navigation_channel_search_title">Search navigation audio stream</string>
+    <string name="settings_navigation_channel_search_prompt">A test tone is looping on stream %1$d. Press volume up and down and confirm that the test tone changes volume normally.</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">The wheel-key accessibility service is not connected. Enable it before starting navigation channel search.</string>
+    <string name="settings_navigation_channel_search_volume_enabled">Independent navigation volume and the wheel-key service are on. This test checks the selected route; DiPlay will attempt to adjust the same stream during real guidance.</string>
+    <string name="settings_navigation_channel_search_apply">Test passed and apply</string>
+    <string name="settings_navigation_channel_search_previous">Previous stream</string>
+    <string name="settings_navigation_channel_search_next">Next stream</string>
+    <string name="settings_navigation_channel_search_saved_title">Navigation audio stream saved</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">Stream %1$d was saved. Reconnect CarPlay now so real navigation audio uses it?</string>
+    <string name="settings_navigation_channel_search_reconnect_now">Yes, reconnect</string>
+    <string name="settings_navigation_channel_search_reconnect_later">No, later</string>
+</resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">Начать поиск</string>
+    <string name="settings_navigation_channel_search_offer">Отдельная громкость навигации включена. Найти рабочий канал сейчас? Подключённая служба клавиш проверит громкость через DiPlay.</string>
+    <string name="settings_navigation_channel_search_title">Поиск канала навигации</string>
+    <string name="settings_navigation_channel_search_prompt">Тестовый сигнал циклически воспроизводится через канал %1$d. Нажмите увеличение и уменьшение громкости и проверьте, меняется ли громкость сигнала.</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">Служба специальных возможностей клавиш руля не подключена. Включите её перед поиском канала навигации.</string>
+    <string name="settings_navigation_channel_search_volume_enabled">Отдельная громкость навигации и служба клавиш включены. Во время реальной навигации DiPlay попробует регулировать тот же канал.</string>
+    <string name="settings_navigation_channel_search_apply">Тест пройден — применить</string>
+    <string name="settings_navigation_channel_search_previous">Предыдущий канал</string>
+    <string name="settings_navigation_channel_search_next">Следующий канал</string>
+    <string name="settings_navigation_channel_search_saved_title">Канал навигации сохранён</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">Канал %1$d сохранён. Переподключить CarPlay сейчас, чтобы использовать его для навигации?</string>
+    <string name="settings_navigation_channel_search_reconnect_now">Да, переподключить</string>
+    <string name="settings_navigation_channel_search_reconnect_later">Нет, позже</string>
+</resources>

@@ -341,6 +341,12 @@ class WheelKeyService : AccessibilityService() {
         if (!NavigationWheelSettings.enabled(this)) return NavigationGate("its setting is off")
         if (running !== this) return NavigationGate("the service is not bound")
         if (inCall(this)) return NavigationGate("a call is active")
+        val test = NavigationChannelVolumeTest.snapshot()
+        if (test.active) {
+            val stream = test.channel?.takeIf { it in 1..20 && it != AudioManager.STREAM_MUSIC }
+                ?: return NavigationGate("the channel-search route ${test.channel ?: "automatic"} has no independent volume")
+            return NavigationGate(null, stream)
+        }
         if (session() == null) return NavigationGate("no CarPlay session")
         val playback = navigationPlayback()
         if (!playback.active) return NavigationGate("no guidance is speaking")

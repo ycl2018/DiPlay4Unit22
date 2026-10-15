@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">开始搜索</string>
+    <string name="settings_navigation_channel_search_offer">独立导航音量已开启。是否现在搜索可正常使用的导航音频通道？已连接的方向盘按键服务会通过 DiPlay 测试音量上下键。</string>
+    <string name="settings_navigation_channel_search_title">搜索导航音频通道</string>
+    <string name="settings_navigation_channel_search_prompt">正在通过通道 %1$d 循环播放测试音。请按音量上下键，确认测试音的音量能否正常变化。</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">方向盘按键无障碍服务未连接。请先启用服务，再开始搜索导航音频通道。</string>
+    <string name="settings_navigation_channel_search_volume_enabled">独立导航音量和方向盘按键服务均已开启。本次会验证所选路由；正式导航播报时 DiPlay 会尝试调节同一通道。</string>
+    <string name="settings_navigation_channel_search_apply">测试正常并应用</string>
+    <string name="settings_navigation_channel_search_previous">上一个频道</string>
+    <string name="settings_navigation_channel_search_next">下一个频道</string>
+    <string name="settings_navigation_channel_search_saved_title">导航音频通道已保存</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">已保存通道 %1$d。是否立即重新连接 CarPlay，让正式导航音频使用此通道？</string>
+    <string name="settings_navigation_channel_search_reconnect_now">是，重新连接</string>
+    <string name="settings_navigation_channel_search_reconnect_later">否，稍后再说</string>
+</resources>

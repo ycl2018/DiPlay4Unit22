@@ -23,7 +23,10 @@ class KeyEventDiagnosticsTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
     @Before fun setUp() = KeyEventDiagnostics.clear(context)
-    @After fun tearDown() = KeyEventDiagnostics.clear(context)
+    @After fun tearDown() {
+        NavigationChannelVolumeTest.stop()
+        KeyEventDiagnostics.clear(context)
+    }
 
     @Test fun recordsPhysicalIdentityStateDecisionAndReadableKeyName() {
         val event = KeyEvent(100, 120, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP,
@@ -38,9 +41,27 @@ class KeyEventDiagnosticsTest {
         assertTrue(report.contains("keyCode=24("))
         assertTrue(report.contains("scanCode=115 deviceId=17 repeat=2"))
         assertTrue(report.contains("sessionActive=false"))
+        assertTrue(report.contains("navigationChannelTest=false"))
         assertTrue(report.contains("legacyStream=none"))
         assertTrue(report.contains("consumed=false handler=system"))
         assertEquals(report, DiagnosticRedactor.redact(report))
+    }
+
+    @Test fun marksTemporaryNavigationChannelTestsExplicitly() {
+        NavigationChannelVolumeTest.start(7)
+
+        KeyEventDiagnostics.record(
+            context,
+            "accessibility",
+            KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP),
+            consumed = false,
+            handler = "vehicle",
+            nowMillis = 1_700_000_000_456L,
+        )
+
+        val report = KeyEventDiagnostics.report(context)
+        assertTrue(report.contains("navigationChannelTest=true"))
+        assertTrue(report.contains("legacyStream=7"))
     }
 
     @Test fun keepsOnlyTheNewestBoundedTail() {

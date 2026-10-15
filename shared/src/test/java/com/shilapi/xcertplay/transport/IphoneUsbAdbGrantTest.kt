@@ -28,16 +28,18 @@ class IphoneUsbAdbGrantTest {
     }
 
     @Test fun parsesBoundedHelperResults() {
-        val granted = IphoneUsbAdbGrant.parse("DIPLAY_USB_GRANT_V1|GRANTED|1|1")
+        val granted = IphoneUsbAdbGrant.parse("DIPLAY_USB_GRANT_V1|GRANTED|1|1|1")
         assertEquals(IphoneUsbAdbGrant.Code.GRANTED, granted.code)
         assertTrue(granted.permissionGranted)
+        assertEquals(1, granted.defaults)
 
         for (invalid in listOf(
             null,
-            "DIPLAY_USB_GRANT_V1|GRANTED|1|0",
-            "DIPLAY_USB_GRANT_V1|GRANTED|1|2",
-            "DIPLAY_USB_GRANT_V1|UNKNOWN|1|1",
-            "DIPLAY_USB_GRANT_V1|GRANTED|-1|0",
+            "DIPLAY_USB_GRANT_V1|GRANTED|1|0|0",
+            "DIPLAY_USB_GRANT_V1|GRANTED|1|2|0",
+            "DIPLAY_USB_GRANT_V1|GRANTED|1|1|2",
+            "DIPLAY_USB_GRANT_V1|UNKNOWN|1|1|1",
+            "DIPLAY_USB_GRANT_V1|GRANTED|-1|0|0",
         )) {
             assertEquals(IphoneUsbAdbGrant.Code.ERROR, IphoneUsbAdbGrant.parse(invalid).code)
         }
@@ -57,5 +59,41 @@ class IphoneUsbAdbGrantTest {
         assertFalse(IphoneUsbAdbGrant.packageMatchesUid(
             "com.shihab.diplay", 9_999, arrayOf("com.shihab.diplay"),
         ))
+    }
+
+    @Test fun installerUidFallbackAllowsTheSameAppAcrossUsersOnly() {
+        assertTrue(IphoneUsbAdbGrant.sameAppId(10_001, 1_010_001))
+        assertFalse(IphoneUsbAdbGrant.sameAppId(10_001, 1_010_002))
+        assertFalse(IphoneUsbAdbGrant.sameAppId(9_999, 1_009_999))
+    }
+
+    @Test fun aCrossUserPackageLookupNeverReplacesTheRunningApplicationsUid() {
+        assertEquals(
+            1_010_001,
+            IphoneUsbAdbGrant.targetUidForPackage(
+                "com.shihab.diplay",
+                1_010_001,
+                packagesForUid = null,
+                packageLookupUid = 10_001,
+            ),
+        )
+        assertEquals(
+            1_010_001,
+            IphoneUsbAdbGrant.targetUidForPackage(
+                "com.shihab.diplay",
+                1_010_001,
+                packagesForUid = arrayOf("com.shihab.diplay"),
+                packageLookupUid = null,
+            ),
+        )
+        assertEquals(
+            null,
+            IphoneUsbAdbGrant.targetUidForPackage(
+                "com.shihab.diplay",
+                1_010_001,
+                packagesForUid = null,
+                packageLookupUid = 10_002,
+            ),
+        )
     }
 }

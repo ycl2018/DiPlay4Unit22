@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">Iniciar búsqueda</string>
+    <string name="settings_navigation_channel_search_offer">El volumen de navegación independiente está activado. ¿Buscar ahora un canal que funcione? El servicio de teclas conectado probará subir y bajar volumen mediante DiPlay.</string>
+    <string name="settings_navigation_channel_search_title">Buscar canal de audio de navegación</string>
+    <string name="settings_navigation_channel_search_prompt">Se está repitiendo un tono de prueba en el canal %1$d. Pulsa subir y bajar volumen y confirma que el volumen del tono cambia correctamente.</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">El servicio de accesibilidad de las teclas no está conectado. Actívalo antes de buscar canales de navegación.</string>
+    <string name="settings_navigation_channel_search_volume_enabled">El volumen de navegación independiente y el servicio de teclas están activados. DiPlay intentará ajustar este mismo canal durante la navegación real.</string>
+    <string name="settings_navigation_channel_search_apply">La prueba funciona; aplicar</string>
+    <string name="settings_navigation_channel_search_previous">Canal anterior</string>
+    <string name="settings_navigation_channel_search_next">Canal siguiente</string>
+    <string name="settings_navigation_channel_search_saved_title">Canal de navegación guardado</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">Se guardó el canal %1$d. ¿Reconectar CarPlay ahora para usarlo con la navegación real?</string>
+    <string name="settings_navigation_channel_search_reconnect_now">Sí, reconectar</string>
+    <string name="settings_navigation_channel_search_reconnect_later">No, más tarde</string>
+</resources>

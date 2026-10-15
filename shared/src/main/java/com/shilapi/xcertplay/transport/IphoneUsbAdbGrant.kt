@@ -13,6 +13,7 @@ import java.lang.reflect.InvocationTargetException
 import kotlin.system.exitProcess
 
 private const val FIRST_APPLICATION_UID = 10_000
+private const val UIDS_PER_USER = 100_000
 
 /** Grants iPhone USB access when Android 7.1 through 9 has no permission activity to show. */
 internal object IphoneUsbAdbGrant {
@@ -23,6 +24,7 @@ internal object IphoneUsbAdbGrant {
         val code: Code,
         val attached: Int = 0,
         val granted: Int = 0,
+        val defaults: Int = 0,
     ) {
         val permissionGranted: Boolean get() = granted > 0
     }
@@ -70,12 +72,14 @@ internal object IphoneUsbAdbGrant {
 
     internal fun parse(output: String?): Result {
         val fields = output?.trim()?.lineSequence()?.lastOrNull()?.split('|') ?: return Result(Code.ERROR)
-        if (fields.size != 4 || fields[0] != HEADER) return Result(Code.ERROR)
+        if (fields.size != 5 || fields[0] != HEADER) return Result(Code.ERROR)
         val code = Code.entries.firstOrNull { it.name == fields[1] } ?: return Result(Code.ERROR)
         val counts = fields.drop(2).map { it.toIntOrNull() ?: return Result(Code.ERROR) }
-        if (counts.any { it !in 0..16 } || counts[1] > counts[0]) return Result(Code.ERROR)
+        if (counts.any { it !in 0..16 } || counts[1] > counts[0] || counts[2] > counts[0]) {
+            return Result(Code.ERROR)
+        }
         if (code == Code.GRANTED && counts[1] == 0) return Result(Code.ERROR)
-        return Result(code, counts[0], counts[1])
+        return Result(code, counts[0], counts[1], counts[2])
     }
 
     internal fun packageMatchesUid(
@@ -83,6 +87,23 @@ internal object IphoneUsbAdbGrant {
         targetUid: Int,
         packagesForUid: Array<String>?,
     ): Boolean = targetUid >= FIRST_APPLICATION_UID && packageName in packagesForUid.orEmpty()
+
+    internal fun sameAppId(firstUid: Int, secondUid: Int): Boolean =
+        firstUid >= FIRST_APPLICATION_UID &&
+            secondUid >= FIRST_APPLICATION_UID &&
+            firstUid % UIDS_PER_USER == secondUid % UIDS_PER_USER
+
+    /** Validate package ownership without replacing the UID of the running DiPlay process. */
+    internal fun targetUidForPackage(
+        packageName: String,
+        targetUid: Int,
+        packagesForUid: Array<String>?,
+        packageLookupUid: Int?,
+    ): Int? = when {
+        packageMatchesUid(packageName, targetUid, packagesForUid) -> targetUid
+        packageLookupUid != null && sameAppId(targetUid, packageLookupUid) -> targetUid
+        else -> null
+    }
 }
 
 /**
@@ -105,8 +126,15 @@ object IphoneUsbGrantTool {
                 else IphoneUsbAdbGrant.Code.ERROR,
             )
         }
-        println("${IphoneUsbAdbGrant.HEADER}|${result.code}|${result.attached}|${result.granted}")
+        println(
+            "${IphoneUsbAdbGrant.HEADER}|${result.code}|${result.attached}|" +
+                "${result.granted}|${result.defaults}",
+        )
         exitProcess(0)
+    }
+
+    private data class TargetApp(val uid: Int) {
+        val userId: Int get() = uid / UIDS_PER_USER
     }
 
     @SuppressLint("PrivateApi")
@@ -131,13 +159,18 @@ object IphoneUsbGrantTool {
 
         val context = systemContext()
         val packagesForUid = context.packageManager.getPackagesForUid(targetUid)
-        if (!IphoneUsbAdbGrant.packageMatchesUid(
-                packageName,
-                targetUid,
-                packagesForUid,
-            )) {
-            return IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.DENIED)
+        val packageLookupUid = if (IphoneUsbAdbGrant.packageMatchesUid(packageName, targetUid, packagesForUid)) {
+            null
+        } else {
+            runCatching { context.packageManager.getApplicationInfo(packageName, 0).uid }.getOrNull()
         }
+        val validatedUid = IphoneUsbAdbGrant.targetUidForPackage(
+            packageName,
+            targetUid,
+            packagesForUid,
+            packageLookupUid,
+        ) ?: return IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.DENIED)
+        val target = TargetApp(validatedUid)
         val usb = context.getSystemService(UsbManager::class.java)
             ?: return IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.UNSUPPORTED)
         val devices = usb.deviceList.values
@@ -146,16 +179,33 @@ object IphoneUsbGrantTool {
         if (devices.isEmpty()) return IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.NO_DEVICE)
 
         val service = usbService() ?: return IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.UNSUPPORTED)
-        val grant = Class.forName("android.hardware.usb.IUsbManager")
-            .getMethod("grantDevicePermission", UsbDevice::class.java, Integer.TYPE)
+        val serviceType = Class.forName("android.hardware.usb.IUsbManager")
+        val grant = serviceType.getMethod("grantDevicePermission", UsbDevice::class.java, Integer.TYPE)
+        val setDefault = runCatching {
+            serviceType.getMethod(
+                "setDevicePackage",
+                UsbDevice::class.java,
+                String::class.java,
+                Integer.TYPE,
+            )
+        }.getOrNull()
         var granted = 0
+        var defaults = 0
         var denied = false
         for (device in devices) {
             try {
-                invoke(grant, service, device, targetUid)
+                invoke(grant, service, device, target.uid)
                 granted++
             } catch (error: Throwable) {
                 if (unwrap(error) is SecurityException) denied = true
+            }
+            if (setDefault != null) {
+                try {
+                    invoke(setDefault, service, device, packageName, target.userId)
+                    defaults++
+                } catch (error: Throwable) {
+                    if (unwrap(error) is SecurityException) denied = true
+                }
             }
         }
         val code = when {
@@ -163,7 +213,7 @@ object IphoneUsbGrantTool {
             denied -> IphoneUsbAdbGrant.Code.DENIED
             else -> IphoneUsbAdbGrant.Code.ERROR
         }
-        return IphoneUsbAdbGrant.Result(code, devices.size, granted)
+        return IphoneUsbAdbGrant.Result(code, devices.size, granted, defaults)
     }
 
     @SuppressLint("PrivateApi")

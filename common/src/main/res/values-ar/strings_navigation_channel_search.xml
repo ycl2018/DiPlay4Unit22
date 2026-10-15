@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_channel_search_start">بدء البحث</string>
+    <string name="settings_navigation_channel_search_offer">تم تشغيل مستوى صوت الملاحة المستقل. هل تريد البحث عن قناة تعمل الآن؟ ستختبر خدمة الأزرار المتصلة رفع وخفض الصوت عبر DiPlay.</string>
+    <string name="settings_navigation_channel_search_title">البحث عن قناة صوت الملاحة</string>
+    <string name="settings_navigation_channel_search_prompt">تتكرر نغمة اختبار على القناة %1$d. اضغط رفع وخفض الصوت وتأكد من أن مستوى النغمة يتغير بصورة صحيحة.</string>
+    <string name="settings_navigation_channel_search_volume_service_missing">خدمة تسهيل استخدام أزرار المقود غير متصلة. فعّلها قبل بدء البحث عن قناة الملاحة.</string>
+    <string name="settings_navigation_channel_search_volume_enabled">مستوى صوت الملاحة المستقل وخدمة الأزرار مفعّلان. سيحاول DiPlay ضبط القناة نفسها أثناء الملاحة الفعلية.</string>
+    <string name="settings_navigation_channel_search_apply">نجح الاختبار، تطبيق</string>
+    <string name="settings_navigation_channel_search_previous">القناة السابقة</string>
+    <string name="settings_navigation_channel_search_next">القناة التالية</string>
+    <string name="settings_navigation_channel_search_saved_title">تم حفظ قناة الملاحة</string>
+    <string name="settings_navigation_channel_search_reconnect_prompt">تم حفظ القناة %1$d. هل تريد إعادة توصيل CarPlay الآن لاستخدامها مع الملاحة الفعلية؟</string>
+    <string name="settings_navigation_channel_search_reconnect_now">نعم، إعادة التوصيل</string>
+    <string name="settings_navigation_channel_search_reconnect_later">لا، لاحقًا</string>
+</resources>

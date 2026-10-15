@@ -33,6 +33,7 @@ internal object KeyEventDiagnostics {
         val sessionActive: Boolean,
         val guidanceActive: Boolean,
         val navigationAudioActive: Boolean,
+        val navigationChannelTest: Boolean,
         val legacyStream: Int?,
         val mapEligible: Boolean,
         val navigationEligible: Boolean,
@@ -87,15 +88,19 @@ internal object KeyEventDiagnostics {
         val controller = background?.controller
         val sessionActive = controller?.activeAirPlaySessionToken() != null
         val playback = NavigationPlayback.snapshot()
+        val channelTest = NavigationChannelVolumeTest.snapshot()
         val calling = inCall(context)
-        val legacyStream = playback.legacyStreamType
-        val navigationEligible = NavigationWheelSettings.enabled(context) && sessionActive && !calling &&
-            playback.active && !playback.priorityVoiceActive &&
+        val legacyStream = if (channelTest.active) channelTest.channel else playback.legacyStreamType
+        val navigationAudioActive = channelTest.active || playback.active
+        val priorityVoiceActive = !channelTest.active && playback.priorityVoiceActive
+        val navigationEligible = NavigationWheelSettings.enabled(context) &&
+            (channelTest.active || sessionActive) && !calling && navigationAudioActive && !priorityVoiceActive &&
             legacyStream != null && legacyStream in 1..20 && legacyStream != AudioManager.STREAM_MUSIC
         return State(
             sessionActive = sessionActive,
             guidanceActive = CarPlayGlance.snapshot().maneuverType != null,
-            navigationAudioActive = playback.active,
+            navigationAudioActive = navigationAudioActive,
+            navigationChannelTest = channelTest.active,
             legacyStream = legacyStream,
             mapEligible = controller?.dashboardMapStreaming() == true,
             navigationEligible = navigationEligible,
@@ -120,6 +125,7 @@ internal object KeyEventDiagnostics {
                 append(" sessionActive=").append(state.sessionActive)
                 append(" guidanceActive=").append(state.guidanceActive)
                 append(" navigationAudioActive=").append(state.navigationAudioActive)
+                append(" navigationChannelTest=").append(state.navigationChannelTest)
                 append(" legacyStream=").append(state.legacyStream ?: "none")
                 append(" mapEligible=").append(state.mapEligible)
                 append(" navigationEligible=").append(state.navigationEligible)

@@ -21,6 +21,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaFormat
 import android.net.Uri
@@ -100,6 +101,15 @@ import kotlin.math.roundToInt
 
 internal enum class SettingsCategory {
     OVERVIEW, CONNECTION, DISPLAY, AUDIO, NAVIGATION, VEHICLE, LANGUAGE, DIAGNOSTICS, ADVANCED, ABOUT,
+}
+
+internal val NAVIGATION_VOLUME_SEARCH_CHANNELS = (1..20).filter { it != AudioManager.STREAM_MUSIC }
+
+internal fun adjacentNavigationVolumeChannel(channel: Int, delta: Int): Int {
+    val current = NAVIGATION_VOLUME_SEARCH_CHANNELS.indexOf(channel).takeIf { it >= 0 } ?: 0
+    return NAVIGATION_VOLUME_SEARCH_CHANNELS[
+        Math.floorMod(current + delta, NAVIGATION_VOLUME_SEARCH_CHANNELS.size)
+    ]
 }
 
 /** A settings card. Every entry needs one category in [SettingsInformationArchitecture]; see AGENTS.md. */
@@ -201,6 +211,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var navigationStreamType = 14
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
+    private var audioChannelDialog: AlertDialog? = null
+    private var navigationChannelSearchDialog: AlertDialog? = null
+    private var navigationChannelInfoDialog: AlertDialog? = null
     private var exportButton: Button? = null
     private var rootScroll: ScrollView? = null
     private var settingsRailScroll: ScrollView? = null
@@ -531,6 +544,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
     override fun onPause() {
+        audioChannelDialog?.dismiss()
+        audioChannelDialog = null
+        navigationChannelSearchDialog?.dismiss()
+        navigationChannelSearchDialog = null
+        navigationChannelInfoDialog?.dismiss()
+        navigationChannelInfoDialog = null
         appearanceUpdatesResumed = false
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
@@ -542,6 +561,13 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun onDestroy() {
+        NavigationChannelVolumeTest.stop()
+        audioChannelDialog?.dismiss()
+        audioChannelDialog = null
+        navigationChannelSearchDialog?.dismiss()
+        navigationChannelSearchDialog = null
+        navigationChannelInfoDialog?.dismiss()
+        navigationChannelInfoDialog = null
         settingsSearchPopup?.dismiss()
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
@@ -3395,23 +3421,159 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     private fun showChannelDialog(title: String, current: Int, navigation: Boolean, onApply: (Int) -> Unit) {
-        val preview = AudioChannelPreview { channel ->
-            toast(getString(R.string.contrib_audio_home_channel_preview_unavailable, channel))
-        }
+        val preview = AudioChannelPreview(
+            onUnavailable = { channel ->
+                toast(getString(R.string.contrib_audio_home_channel_preview_unavailable, channel))
+            },
+        )
         val channels = AirPlayPersistence.AUDIO_CHANNELS
         val labels = channels.map(Int::toString).toTypedArray()
         var selection = current.coerceIn(channels.first, channels.last)
-        appDialogBuilder().setTitle(title)
+        val dialog = appDialogBuilder().setTitle(title)
             .setSingleChoiceItems(labels, selection) { _, which ->
                 selection = which
                 preview.play(which, navigation)
             }
-            .setPositiveButton(if (CarPlayBackgroundSession.hasSession()) getString(R.string.apply_and_reconnect) else getString(R.string.save)) { _, _ ->
+            .setPositiveButton(
+                if (navigation || !CarPlayBackgroundSession.hasSession()) getString(R.string.save)
+                else getString(R.string.apply_and_reconnect),
+            ) { _, _ ->
                 onApply(selection)
             }
             .setNegativeButton(getString(R.string.cancel), null)
-            .setOnDismissListener { preview.close() }
-            .show()
+            .create()
+        dialog.setOnDismissListener {
+            preview.close()
+            if (audioChannelDialog === dialog) audioChannelDialog = null
+        }
+        audioChannelDialog?.dismiss()
+        audioChannelDialog = dialog
+        dialog.show()
+    }
+
+    private fun showNavigationChannelSearchDialog(initial: Int, onApply: (Int) -> Unit) {
+        if (!NavigationWheelSettings.enabled(this) || !WheelKeyService.connected()) {
+            showNavigationChannelSearchPrerequisite()
+            return
+        }
+        var channel = initial.takeIf { it in NAVIGATION_VOLUME_SEARCH_CHANNELS }
+            ?: NAVIGATION_VOLUME_SEARCH_CHANNELS.first()
+        var previewReady = false
+        var applyButton: Button? = null
+        val preview = AudioChannelPreview(
+            onUnavailable = { unavailable ->
+                if (unavailable == channel) {
+                    previewReady = false
+                    applyButton?.isEnabled = false
+                    applyButton?.alpha = 0.45f
+                    NavigationChannelVolumeTest.stop()
+                }
+                toast(getString(R.string.contrib_audio_home_channel_preview_unavailable, unavailable))
+            },
+            onStarted = { started ->
+                if (started == channel) {
+                    previewReady = true
+                    applyButton?.isEnabled = true
+                    applyButton?.alpha = 1f
+                }
+            },
+        )
+        val body = column().apply { setPadding(dp(24), dp(12), dp(24), dp(8)) }
+        val prompt = label("", 17, TEXT, true)
+        val wheelVolume = label("", 14, MUTED)
+        body.addView(prompt)
+        body.addView(wheelVolume, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+
+        fun update() {
+            previewReady = false
+            applyButton?.isEnabled = false
+            applyButton?.alpha = 0.45f
+            prompt.text = getString(R.string.settings_navigation_channel_search_prompt, channel)
+            wheelVolume.text = getString(R.string.settings_navigation_channel_search_volume_enabled)
+            wheelVolume.setTextColor(TEXT)
+            NavigationChannelVolumeTest.start(channel)
+            preview.play(channel, navigation = true, continuous = true)
+        }
+
+        val dialog = appDialogBuilder()
+            .setTitle(getString(R.string.settings_navigation_channel_search_title))
+            .setView(body)
+            .setPositiveButton(getString(R.string.settings_navigation_channel_search_apply), null)
+            .setNegativeButton(getString(R.string.settings_navigation_channel_search_previous), null)
+            .setNeutralButton(getString(R.string.settings_navigation_channel_search_next), null)
+            .create()
+        dialog.setOnDismissListener {
+            NavigationChannelVolumeTest.stop()
+            preview.close()
+            if (navigationChannelSearchDialog === dialog) navigationChannelSearchDialog = null
+        }
+        dialog.setOnShowListener {
+            applyButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                isEnabled = false
+                alpha = 0.45f
+            }
+            applyButton?.setOnClickListener {
+                if (!previewReady) return@setOnClickListener
+                if (!NavigationWheelSettings.enabled(this) || !WheelKeyService.connected()) {
+                    dialog.dismiss()
+                    showNavigationChannelSearchPrerequisite()
+                    return@setOnClickListener
+                }
+                val selected = channel
+                dialog.dismiss()
+                onApply(selected)
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                channel = adjacentNavigationVolumeChannel(channel, -1)
+                update()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                channel = adjacentNavigationVolumeChannel(channel, 1)
+                update()
+            }
+            update()
+        }
+        navigationChannelSearchDialog?.dismiss()
+        navigationChannelSearchDialog = dialog
+        dialog.show()
+    }
+
+    private fun offerNavigationChannelSearch() {
+        if (!NavigationWheelSettings.enabled(this)) return
+        if (!WheelKeyService.connected()) {
+            showNavigationChannelSearchPrerequisite()
+            return
+        }
+        val dialog = appDialogBuilder()
+            .setTitle(getString(R.string.settings_navigation_wheel_volume))
+            .setMessage(getString(R.string.settings_navigation_channel_search_offer))
+            .setPositiveButton(getString(R.string.settings_navigation_channel_search_start)) { _, _ ->
+                val previous = AirPlayPersistence.loadNavigationAudioChannel(this)
+                showNavigationChannelSearchDialog(previous) { value ->
+                    applyNavigationChannel(value, previous, null, null, applyUnchanged = true)
+                }
+            }
+            .setNegativeButton(getString(R.string.later), null)
+            .create()
+        showNavigationChannelInfoDialog(dialog)
+    }
+
+    private fun showNavigationChannelSearchPrerequisite() {
+        val dialog = appDialogBuilder()
+            .setTitle(getString(R.string.settings_navigation_channel_search_title))
+            .setMessage(getString(R.string.settings_navigation_channel_search_volume_service_missing))
+            .setPositiveButton(getString(R.string.close), null)
+            .create()
+        showNavigationChannelInfoDialog(dialog)
+    }
+
+    private fun showNavigationChannelInfoDialog(dialog: AlertDialog) {
+        dialog.setOnDismissListener {
+            if (navigationChannelInfoDialog === dialog) navigationChannelInfoDialog = null
+        }
+        navigationChannelInfoDialog?.dismiss()
+        navigationChannelInfoDialog = dialog
+        dialog.show()
     }
 
     private fun applyMediaChannel(value: Int, previous: Int, control: Button, summary: (Int) -> String) {
@@ -3421,11 +3583,36 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
     }
 
-    private fun applyNavigationChannel(value: Int, previous: Int, control: Button, summary: (Int) -> String) {
-        if (value == previous) return
+    private fun applyNavigationChannel(
+        value: Int,
+        previous: Int,
+        control: Button?,
+        summary: ((Int) -> String)?,
+        applyUnchanged: Boolean = false,
+    ) {
+        if (value == previous && !applyUnchanged) return
         AirPlayPersistence.saveNavigationAudioChannel(this, value)
-        control.text = summary(value)
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        control?.text = summary?.invoke(value)
+        if (control == null) render()
+        if (!CarPlayBackgroundSession.hasSession()) {
+            toast(getString(R.string.saved_for_your_next_connection))
+            return
+        }
+        var reconnectChosen = false
+        appDialogBuilder()
+            .setTitle(getString(R.string.settings_navigation_channel_search_saved_title))
+            .setMessage(getString(R.string.settings_navigation_channel_search_reconnect_prompt, value))
+            .setPositiveButton(getString(R.string.settings_navigation_channel_search_reconnect_now)) { _, _ ->
+                reconnectChosen = true
+                connect(AirPlayPersistence.loadWirelessEnabled(this))
+            }
+            .setNegativeButton(getString(R.string.settings_navigation_channel_search_reconnect_later)) { _, _ ->
+                markReconnectNeeded()
+            }
+            .setOnCancelListener {
+                if (!reconnectChosen) markReconnectNeeded()
+            }
+            .show()
     }
 
     private fun channelLabel(value: Int): String = value.toString()
@@ -3845,8 +4032,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             NavigationWheelSettings.enabled(this)) {
             NavigationWheelSettings.setEnabled(this, it)
             render()
+            if (it) handler.post(::offerNavigationChannelSearch)
         }
-        if (!NavigationWheelSettings.enabled(this) || WheelKeyService.connected()) return
+        if (!NavigationWheelSettings.enabled(this)) return
+        if (WheelKeyService.connected()) {
+            card.addView(button(getString(R.string.settings_navigation_channel_search_start), false) {
+                offerNavigationChannelSearch()
+            }, matchButton(10, 56))
+            return
+        }
         card.addView(label(getString(R.string.settings_navigation_wheel_service_required), 14, WARNING))
         card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
             if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))

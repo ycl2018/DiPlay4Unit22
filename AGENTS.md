@@ -137,6 +137,46 @@ that a framework intent has a resolver merely because the API exists on Android 
 - Apply the same resolver check to other optional AOSP activities introduced in future changes.
   Test the unavailable-component path on API 28, not only the normal emulator/AOSP path.
 
+### Wired USB authorization
+
+The S202 USB permission path is a validated vehicle override, not merely the generic missing-AOSP-
+activity fallback. Preserve these rules whenever upstream USB code is merged or authorization,
+connection startup, `LocalAdb`, package/UID handling, shrinking, or USB re-enumeration is changed:
+
+1. On the reference S202, prefer the already-approved in-app `LocalAdb` path before calling
+   `UsbManager.requestPermission()`. Do not gate this override only on
+   `UsbPermissionActivityProbe` reporting `UNAVAILABLE`: this firmware may publish an enabled
+   `com.android.systemui/com.android.systemui.usb.UsbPermissionActivity` that still cannot present
+   or complete a usable authorization flow. Waiting on that false-positive path leaves the UI at
+   "Allow the connection permission to continue."
+2. Preserve `LocalAdbShellPolicy` and `VendorShellOutput`. The in-app ADB client must send the S202
+   validation password as the shell stdin preamble and wait for the post-validation boundary before
+   parsing helper output. The external Windows `adb.exe` command pattern above is not a replacement
+   for this in-app behavior.
+3. Run the bounded `IphoneUsbGrantTool` through `app_process` under the already-authorized shell UID.
+   It may grant only attached Apple devices matching the requested VID/PID, and must grant the
+   permission to DiPlay's actual application UID. Keep multi-user handling: validate the exact UID
+   first, then accept only a package lookup with the same Android app ID across users. Keep
+   `setDevicePackage(device, packageName, userId)` as a best-effort compatibility step on firmware
+   that exposes it; a failed default assignment must not erase a successful temporary grant.
+4. Apply the grant to both the initially attached iPhone and the new `UsbDevice` after the CarPlay
+   mode switch. iPhone USB re-enumeration creates a new permission identity, so success on the first
+   device does not authorize the second one.
+5. Keep the `IphoneUsbGrantTool.main(String[])` R8/Proguard entry-point rule. A debug build passing
+   while a release build strips or renames this `app_process` entry point is a connection regression.
+6. Keep grant callbacks generation-sensitive. A stale callback must not clear
+   `pendingUsbAdbGrants` for the current phase/reconnect generation. For non-S202 devices, preserve
+   the generic Android 7.1-9 missing-UI fallback and the full 120-second system-permission response
+   window.
+
+Regression coverage must prove that an API 28 S202 routes to `AdbRequired` even when the standard
+USB permission activity appears enabled, and that no system permission request is launched in that
+case. Preserve bounded helper-result parsing, multi-user app-ID validation, initial-device and
+post-re-enumeration authorization, and diagnostics containing `USB permission ADB grant result=`,
+`attached=`, `granted=` and `defaults=`. On a real S202, the expected successful sequence is an ADB
+grant for the initial device, USB mode transition, then another ADB grant for the re-enumerated
+device before USBMUX/NCM data paths open.
+
 ### Compatibility review checklist
 
 Before reporting a Changan adaptation or upstream merge as complete, check all of these in
@@ -150,6 +190,9 @@ addition to the normal CI command:
 5. The built/tested APK comes from `mobile`, and its package/variant/signing identity is recorded.
 6. Any test whose upstream assumptions intentionally conflict with this branch is called out and
    adapted deliberately; do not hide the failure or undo the vehicle workaround reflexively.
+7. S202 wired USB still takes the ADB-first authorization path for both initial attachment and
+   re-enumeration, even when the standard USB permission activity appears enabled; release shrinking
+   retains `IphoneUsbGrantTool` and diagnostics record the grant result.
 
 ## Adding or moving a setting
 

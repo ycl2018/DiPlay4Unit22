@@ -47,6 +47,7 @@ class WheelKeyServiceTest {
     }
 
     @After fun tearDown() {
+        NavigationChannelVolumeTest.stop()
         service.onDestroy()
         BydOutputSettings.setCarPlayCallControls(service, false)
         BydCarPlayCall.end()
@@ -540,6 +541,25 @@ class WheelKeyServiceTest {
         playback = com.shilapi.xcertplay.media.NavigationPlaybackSnapshot(true, AudioManager.STREAM_NOTIFICATION, true)
         assertFalse(dispatch(event(KeyEvent.ACTION_DOWN, 6)))
         assertEquals(3, audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+    }
+
+    @Test fun channelSearchUsesTheNavigationVolumePathWithoutAnActiveCarPlaySession() {
+        WheelZoomSettings.setEnabled(service, false)
+        NavigationWheelSettings.setEnabled(service, true)
+        service.session = { null }
+        service.navigationPlayback = {
+            com.shilapi.xcertplay.media.NavigationPlaybackSnapshot(false, null)
+        }
+        val audio = service.getSystemService(AudioManager::class.java)
+        audio.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 2, 0)
+        NavigationChannelVolumeTest.start(AudioManager.STREAM_NOTIFICATION)
+
+        assertTrue(key(KeyEvent.KEYCODE_VOLUME_UP, true, time = 10))
+        assertEquals(3, audio.getStreamVolume(AudioManager.STREAM_NOTIFICATION))
+        assertTrue(key(KeyEvent.KEYCODE_VOLUME_UP, false, time = 10))
+
+        NavigationChannelVolumeTest.stop()
+        assertFalse(key(KeyEvent.KEYCODE_VOLUME_UP, true, time = 20))
     }
 
 }
