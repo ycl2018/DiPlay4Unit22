@@ -78,11 +78,20 @@ internal class MicrophoneUplink(
             return false
         }
 
-        // Geely records silence through VOICE_RECOGNITION. On the Changan S202 that source returned
-        // almost exactly four seconds of PCM per wall-clock second in every measured Siri session,
-        // while two real calls proved VOICE_COMMUNICATION has the requested rate on the same car.
-        val speechUsesCommunication = GeelyHeadUnit.detected || ChanganS202HeadUnit.detected
-        val source = microphoneAudioSource(config.audioType, speakerphoneCall, speechUsesCommunication)
+        val geelyHeadUnit = GeelyHeadUnit.detected
+        val speechUsesCommunication = geelyHeadUnit || ChanganS202HeadUnit.detected
+        val source = if (config.audioType == "telephony") {
+            telephonyMicrophoneSource(
+                speakerphoneCall = speakerphoneCall,
+                carPhoneState = PhoneAudioRoute.carPlayCallsUseCarAudio(),
+                geelyHeadUnit = geelyHeadUnit,
+            )
+        } else {
+            // Geely records silence through VOICE_RECOGNITION. On the Changan S202 that source
+            // returned almost exactly four seconds of PCM per wall-clock second in every measured
+            // Siri session, while two real calls proved VOICE_COMMUNICATION has the requested rate.
+            microphoneAudioSource(config.audioType, speakerphoneCall, speechUsesCommunication)
+        }
         if (config.audioType == "speechrecognition" && source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
             stats.useVoiceCommunicationSource()
         }
@@ -268,6 +277,7 @@ internal class MicrophoneUplink(
     }
 
     private fun capture(recorder: AudioRecord, socket: DatagramSocket) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val frame = ByteArray(config.frameBytes)
         val readBuffer = ByteArray(maxOf(frame.size, MIN_READ_BYTES))
         val counters = MicrophoneCounters()
@@ -521,6 +531,19 @@ internal fun microphoneAudioSource(
     audioType == "speechrecognition" && speechUsesCommunication -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
     audioType == "speechrecognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
     else -> MediaRecorder.AudioSource.MIC
+}
+
+/**
+ * The recorder source for a CarPlay call. While DiPlay holds the car's phone audio state the car's call
+ * processing is on for every source, but VOICE_COMMUNICATION then clips (about a fifth of the samples on a
+ * Han) and the plain microphone source is muted. VOICE_RECOGNITION, which is also what the stock CarPlay
+ * service ends up with, gives a normal level with no clipping, and the car still suppresses the far end's
+ * echo on it. Geely/Lynk head units record silence on VOICE_RECOGNITION, so they keep the old choice.
+ */
+internal fun telephonyMicrophoneSource(speakerphoneCall: Boolean, carPhoneState: Boolean, geelyHeadUnit: Boolean): Int = when {
+    carPhoneState && !geelyHeadUnit -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    speakerphoneCall -> MediaRecorder.AudioSource.MIC
+    else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
 }
 
 /**
