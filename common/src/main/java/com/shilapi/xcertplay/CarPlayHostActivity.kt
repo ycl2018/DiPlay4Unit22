@@ -1587,7 +1587,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 WheelZoomKeys.Action.CONSUME
             }
         } else WheelZoomKeys.Action.PASS
-        if (remappedMedia != WheelZoomKeys.Action.PASS) return true
+        if (remappedMedia != WheelZoomKeys.Action.PASS) {
+            return finishKeyDispatch(event, true, "assigned-media-play-pause")
+        }
         if (!menuOpen &&
             (AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this) ||
                 CarPlayRemoteKeys.fromExternalController(event, AirPlayPersistence.loadExternalController(this))) &&

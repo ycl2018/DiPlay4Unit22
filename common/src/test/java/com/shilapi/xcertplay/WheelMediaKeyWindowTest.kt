@@ -133,6 +133,13 @@ class WheelMediaKeyWindowTest {
         assertTrue(host.dispatchKeyEvent(key(KeyEvent.KEYCODE_F9, true, repeat = 1)))
         assertTrue(host.dispatchKeyEvent(key(KeyEvent.KEYCODE_F9, false)))
         verify(controller, times(1)).sendMediaButton(CarPlayMediaButton.PLAY_PAUSE)
+        val events = KeyEventDiagnostics.report(host).lines()
+            .filter { it.contains("keyCode=${KeyEvent.KEYCODE_F9}(") }
+        assertEquals(3, events.size)
+        assertTrue(events[0].contains("action=DOWN"))
+        assertTrue(events[1].contains("repeat=1"))
+        assertTrue(events[2].contains("action=UP"))
+        assertTrue(events.all { it.contains("consumed=true handler=assigned-media-play-pause") })
     }
 
     @Test fun remappedPlayPauseKeyNeverStealsACallOrAnAbsentSession() {
